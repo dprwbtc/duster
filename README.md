@@ -92,4 +92,4 @@ reducing the token's supply. Any extra from positive slippage stays with the use
 - Consider making the repo public so users can verify what they're signing.
 - The fee buys a token you may hold, which supports its price with your users' money. Disclose that
   plainly, and get advice on how it's treated where you and your users are.
-- Check that `BURN_TOKEN_MINT` is the real token. Several copycats share the name.
+- `BURN_TOKEN_MINT` for $LILVADER is `DBFcomeF97mTgRoKvHj2YtdFdvFcrLP4pFTBEPpKpump`. Several copycats share the name.
