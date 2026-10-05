@@ -2,7 +2,6 @@ import {
   AddressLookupTableAccount,
   ComputeBudgetProgram,
   Connection,
-  Keypair,
   PublicKey,
   TransactionInstruction,
   TransactionMessage,
@@ -131,18 +130,18 @@ export function groupBySize(payer: PublicKey, legs: SwapLeg[], closeSource: bool
 
 /**
  * Simulate a group to size the compute budget. If it fails, bisect so one bad token
- * (no route, frozen, etc.) doesn't sink the others. Returns signed-ready batches.
+ * (no route, frozen, etc.) doesn't sink the others. Returns unsigned batches (the caller signs).
  */
 export async function finalize(
   connection: Connection,
-  payer: Keypair,
+  payer: PublicKey,
   legs: SwapLeg[],
   closeSource: boolean,
   skipped: { mint: string; reason: string }[],
 ): Promise<Batch[]> {
   if (legs.length === 0) return [];
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
-  const sim = await connection.simulateTransaction(compile(payer.publicKey, legs, closeSource, CU_MAX, blockhash), {
+  const sim = await connection.simulateTransaction(compile(payer, legs, closeSource, CU_MAX, blockhash), {
     replaceRecentBlockhash: true,
     sigVerify: false,
   });
@@ -158,8 +157,7 @@ export async function finalize(
     ];
   }
   const limit = sim.value.unitsConsumed ? Math.min(Math.ceil(sim.value.unitsConsumed * 1.2), CU_MAX) : CU_MAX;
-  const tx = compile(payer.publicKey, legs, closeSource, limit, blockhash);
+  const tx = compile(payer, legs, closeSource, limit, blockhash);
   if (!fits(tx)) throw new Error("internal: final transaction exceeds size limit");
-  tx.sign([payer]);
   return [{ legs, tx, blockhash, lastValidBlockHeight }];
 }

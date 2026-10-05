@@ -19,3 +19,14 @@ Notes
 - Tokens with no reliable Jupiter price are never touched. Routes losing >`--max-loss-pct` vs. oracle price are skipped.
 - Emptied source token accounts are closed to reclaim rent unless `--no-close`.
 - Each tx is simulated; if one fails, the batch is bisected so a single bad token doesn't block the rest.
+
+## Web UI
+
+```bash
+npm run web      # then open http://localhost:3000
+```
+
+Needs only `JUPITER_API_KEY` (and optionally `RPC_URL`); **no private key**. Connect Phantom, Solflare or
+Backpack, pick the output token (SOL/USDC/USDT, or search / paste any mint), set the value filter, tick the
+tokens you want, preview, then approve in your wallet. The server binds to 127.0.0.1 only and keeps your
+Jupiter key server-side.

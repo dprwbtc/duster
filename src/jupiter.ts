@@ -63,3 +63,18 @@ export function getBuild(
     maxAccounts: String(p.maxAccounts),
   });
 }
+
+export interface TokenMeta {
+  id: string;
+  name: string;
+  symbol: string;
+  icon?: string;
+  decimals: number;
+  usdPrice?: number;
+  isVerified?: boolean;
+}
+
+/** Token search by symbol, name, mint, or comma-separated mints (max 100). */
+export function searchTokens(apiKey: string, query: string): Promise<TokenMeta[]> {
+  return get(apiKey, "/tokens/v2/search", { query });
+}

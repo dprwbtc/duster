@@ -3,9 +3,9 @@ import os from "node:os";
 import readline from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { Connection, Keypair } from "@solana/web3.js";
-import { getBuild, getPrices } from "./jupiter.js";
+import { getPrices } from "./jupiter.js";
 import { getHoldings } from "./wallet.js";
-import { finalize, groupBySize, type SwapLeg } from "./pack.js";
+import { planSwaps } from "./plan.js";
 
 const SOL = "So11111111111111111111111111111111111111112";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -71,38 +71,20 @@ for (const h of holdings) {
 console.log(`\n${candidates.length} dust token(s) ≤ $${maxUsd}:`);
 for (const c of candidates) console.log(`  ${c.h.mint}  ${c.h.uiAmount}  ≈ $${c.usd.toFixed(4)}`);
 
-// 2. Fetch swap instructions for each (a few at a time to respect rate limits).
-const legs: SwapLeg[] = [];
-const queue = [...candidates];
-await Promise.all(
-  Array.from({ length: 3 }, async () => {
-    for (let c; (c = queue.shift()); ) {
-      try {
-        const build = await getBuild(apiKey, {
-          inputMint: c.h.mint,
-          outputMint: outMint,
-          amount: c.h.rawAmount.toString(),
-          taker: payer.publicKey.toBase58(),
-          slippageBps: Number(a.slippage),
-          maxAccounts: Number(a["max-accounts"]),
-        });
-        const outUsd = (Number(build.outAmount) / 10 ** outInfo.decimals) * outInfo.usdPrice;
-        if (outUsd < c.usd * (1 - maxLoss)) {
-          skipped.push({ mint: c.h.mint, reason: `route returns $${outUsd.toFixed(4)} for $${c.usd.toFixed(4)} (> ${a["max-loss-pct"]}% loss)` });
-          continue;
-        }
-        legs.push({ holding: c.h, build, usdIn: c.usd });
-      } catch (e) {
-        skipped.push({ mint: c.h.mint, reason: `no route: ${(e as Error).message.slice(0, 120)}` });
-      }
-    }
-  }),
-);
-
-// 3. Pack into as few transactions as fit, simulate each, drop tokens that fail.
-const batches = (await Promise.all(
-  groupBySize(payer.publicKey, legs, closeSource).map((g) => finalize(connection, payer, g, closeSource, skipped)),
-)).flat();
+// 2-3. Quote, pack into as few transactions as fit, simulate, drop tokens that fail.
+const { batches, skipped: planSkipped } = await planSwaps({
+  connection,
+  apiKey,
+  owner: payer.publicKey,
+  outMint,
+  outInfo,
+  items: candidates,
+  slippageBps: Number(a.slippage),
+  maxAccounts: Number(a["max-accounts"]),
+  maxLoss,
+  closeSource,
+});
+skipped.push(...planSkipped);
 
 console.log(`\nPlan: ${batches.length} transaction(s)`);
 batches.forEach((b, i) => {
@@ -128,6 +110,7 @@ if (!a.yes) {
 }
 for (const b of batches) {
   // Blockhashes last ~60-90s; if you sat on the prompt, this fails preflight and you can just re-run.
+  b.tx.sign([payer]);
   const sig = await connection.sendRawTransaction(b.tx.serialize(), { skipPreflight: false, maxRetries: 3 });
   console.log(`sent ${sig}`);
   const res = await connection.confirmTransaction({ signature: sig, blockhash: b.blockhash, lastValidBlockHeight: b.lastValidBlockHeight }, "confirmed");
