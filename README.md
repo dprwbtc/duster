@@ -1,4 +1,4 @@
-# bulk-swap
+# Duster
 
 Swap many dust tokens into one asset (SOL by default) using Jupiter Swap V2 `/build`,
 packing as many swaps as fit into each transaction.
@@ -33,8 +33,8 @@ Backpack and sign in their wallet. The local server runs the same handlers and s
 
 Layout: `public/` is the static site, `api/*.ts` are Vercel Functions, `src/` is shared code.
 
-1. **Import the repo** in Vercel → *New Project*. Set **Root Directory** to `bulk-swap` and the framework
-   preset to **Other**. `vercel.json` handles the rest.
+1. **Import the repo** in Vercel → *New Project*. Leave **Root Directory** as the default and set the
+   framework preset to **Other**. `vercel.json` handles the rest.
 2. **Environment variables** (Production and Preview):
    - `JUPITER_API_KEY`: from https://developers.jup.ag/portal. Every visitor's requests use your quota,
      so check which plan's rate limits you need.
