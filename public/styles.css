@@ -59,3 +59,5 @@ a { color: var(--accent); }
 .hidden { display: none !important; }
 footer { margin-top: 24px; padding: 0 4px; }
 footer p { margin: 0 0 8px; }
+.notice.ok { background: var(--accent-soft); color: var(--text); }
+.chip .ico { width: 18px; height: 18px; }

@@ -5,7 +5,7 @@ import { Connection, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
 import { getPrices, searchTokens, type TokenMeta } from "./jupiter.js";
 import { getHoldings } from "./wallet.js";
-import { planSwaps } from "./plan.js";
+import { feeApplies, planSwaps, type FeeConfig } from "./plan.js";
 
 const SOL = "So11111111111111111111111111111111111111112";
 const MAX_TOKENS_PER_PLAN = 30; // each token costs a Jupiter /build call plus simulations
@@ -16,6 +16,15 @@ class HttpError extends Error {
   constructor(public status: number, msg: string) {
     super(msg);
   }
+}
+
+/** Buy-and-burn fee, configured by env. Off unless BURN_TOKEN_MINT is set. */
+function feeConfig(): FeeConfig | null {
+  const mint = process.env.BURN_TOKEN_MINT?.trim();
+  if (!mint) return null;
+  const bps = Number(process.env.FEE_BPS ?? 100);
+  if (!Number.isInteger(bps) || bps < 0 || bps > 500) throw new Error("FEE_BPS must be an integer from 0 to 500");
+  return { bps, burnMint: new PublicKey(mint).toBase58(), slippageBps: 300 };
 }
 
 function env() {
@@ -102,6 +111,20 @@ async function holdingsWithValue(apiKey: string, connection: Connection, owner: 
   });
 }
 
+export const config = wrap(async (req) => {
+  rateLimit(req, "config", 30);
+  const fee = feeConfig();
+  if (!fee || fee.bps === 0) return { fee: null };
+  const { apiKey } = env();
+  const [meta] = (await searchTokens(apiKey, fee.burnMint)).filter((t) => t.id === fee.burnMint);
+  return {
+    fee: {
+      bps: fee.bps,
+      burnToken: { id: fee.burnMint, symbol: meta?.symbol ?? "BURN", name: meta?.name ?? "", icon: meta?.icon ?? null, verified: !!meta?.isVerified },
+    },
+  };
+});
+
 export const holdings = wrap(async (req) => {
   rateLimit(req, "holdings", 20);
   const { apiKey, connection } = env();
@@ -166,11 +189,13 @@ export const plan = wrap(async (req) => {
     maxAccounts: 20,
     maxLoss,
     closeSource: b.closeAccounts !== false,
+    fee: feeConfig(),
   });
   // Jupiter/RPC error text can be noisy or leak details; keep reasons short and generic.
   skipped.push(...result.skipped.map((s) => ({ mint: s.mint, reason: s.reason.startsWith("no route") ? "no route found" : s.reason })));
   return {
     skipped,
+    feeApplied: feeApplies(feeConfig(), outMint),
     txs: result.batches.map((bt) => {
       const bytes = bt.tx.serialize();
       return {
@@ -181,6 +206,11 @@ export const plan = wrap(async (req) => {
           usdIn: l.usdIn,
           outAmount: Number(l.build.outAmount) / 10 ** outPrice.decimals,
         })),
+        fee: bt.fee && {
+          amountIn: Number(bt.fee.amountIn) / 10 ** outPrice.decimals,
+          usd: (Number(bt.fee.amountIn) / 10 ** outPrice.decimals) * outPrice.usdPrice,
+          burned: Number(bt.fee.burn.amount) / 10 ** bt.fee.burn.decimals,
+        },
       };
     }),
   };

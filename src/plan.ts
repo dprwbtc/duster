@@ -1,7 +1,15 @@
 import { Connection, PublicKey } from "@solana/web3.js";
+import { getAssociatedTokenAddressSync, getMint } from "@solana/spl-token";
 import { getBuild, type PriceInfo } from "./jupiter.js";
-import { finalize, groupBySize, type Batch, type SwapLeg } from "./pack.js";
+import { finalize, groupBySize, type Batch, type FeeBuilder, type FeeLeg, type SwapLeg } from "./pack.js";
 import type { Holding } from "./wallet.js";
+
+/** Buy-and-burn fee: `bps` of each transaction's guaranteed output buys `burnMint`, which is then burned. */
+export interface FeeConfig {
+  bps: number;
+  burnMint: string;
+  slippageBps: number;
+}
 
 export interface PlanOptions {
   connection: Connection;
@@ -14,11 +22,45 @@ export interface PlanOptions {
   maxAccounts: number;
   maxLoss: number; // fraction, e.g. 0.1
   closeSource: boolean;
+  fee?: FeeConfig | null;
 }
 
 export interface Skipped {
   mint: string;
   reason: string;
+}
+
+/** No fee when the user is already swapping into the burn token. */
+export const feeApplies = (fee: FeeConfig | null | undefined, outMint: string): fee is FeeConfig =>
+  !!fee && fee.bps > 0 && fee.burnMint !== outMint;
+
+/** Fee is charged on the minimum guaranteed output, so it can never exceed `bps` of what the user receives. */
+export const feeAmount = (legs: SwapLeg[], bps: number) =>
+  (legs.reduce((s, l) => s + BigInt(l.build.otherAmountThreshold), 0n) * BigInt(bps)) / 10_000n;
+
+async function makeFeeBuilder(o: PlanOptions): Promise<FeeBuilder> {
+  const fee = o.fee;
+  if (!feeApplies(fee, o.outMint)) return async () => null;
+  const mint = new PublicKey(fee.burnMint);
+  const info = await o.connection.getAccountInfo(mint);
+  if (!info) throw new Error("burn token mint not found on-chain");
+  const tokenProgram = info.owner;
+  const { decimals } = await getMint(o.connection, mint, "confirmed", tokenProgram);
+  const account = getAssociatedTokenAddressSync(mint, o.owner, false, tokenProgram);
+  return async (legs): Promise<FeeLeg | null> => {
+    const amountIn = feeAmount(legs, fee.bps);
+    if (amountIn === 0n) return null; // too small to charge anything
+    const build = await getBuild(o.apiKey, {
+      inputMint: o.outMint,
+      outputMint: fee.burnMint,
+      amount: amountIn.toString(),
+      taker: o.owner.toBase58(),
+      slippageBps: fee.slippageBps,
+      maxAccounts: o.maxAccounts,
+    });
+    // Burn the minimum the swap guarantees; any extra from positive slippage stays with the user.
+    return { build, amountIn, burn: { mint, account, amount: BigInt(build.otherAmountThreshold), decimals, tokenProgram } };
+  };
 }
 
 /** Quote each token, drop bad routes, pack into transactions, simulate. Returns unsigned batches. */
@@ -50,7 +92,18 @@ export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; ski
       }
     }),
   );
-  const groups = groupBySize(o.owner, legs, o.closeSource);
-  const batches = (await Promise.all(groups.map((g) => finalize(o.connection, o.owner, g, o.closeSource, skipped)))).flat();
+  if (!legs.length) return { batches: [], skipped };
+
+  const feeFor = await makeFeeBuilder(o);
+  // Quote the fee once on everything so packing leaves room for each transaction's buy-and-burn.
+  let reserve: FeeLeg | null;
+  try {
+    reserve = await feeFor(legs);
+  } catch {
+    for (const l of legs) skipped.push({ mint: l.holding.mint, reason: "buy-and-burn fee couldn't be routed right now; try again shortly" });
+    return { batches: [], skipped };
+  }
+  const groups = groupBySize(o.owner, legs, o.closeSource, reserve);
+  const batches = (await Promise.all(groups.map((g) => finalize(o.connection, o.owner, g, o.closeSource, feeFor, skipped)))).flat();
   return { batches, skipped };
 }

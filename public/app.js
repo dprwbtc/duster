@@ -7,7 +7,7 @@ const DEFAULTS = [
 const $ = (id) => document.getElementById(id);
 const MAX_TOKENS = 30; // matches the server limit per preview
 const PLAN_TTL_MS = 45_000; // blockhashes expire after ~60-90s
-const state = { wallets: [], wallet: null, account: null, rows: [], selected: new Set(), out: DEFAULTS[1], touched: false, plan: null };
+const state = { fee: undefined, wallets: [], wallet: null, account: null, rows: [], selected: new Set(), out: DEFAULTS[1], touched: false, plan: null };
 
 // Build DOM without innerHTML: token names/symbols are attacker-controlled.
 function h(tag, props = {}, ...kids) {
@@ -24,6 +24,11 @@ const icon = (t) => (t.icon && /^https:\/\//.test(t.icon) ? h("img", { class: "i
 const short = (m) => m.slice(0, 4) + "…" + m.slice(-4);
 const usd = (n) => (n == null ? "—" : n < 0.01 && n > 0 ? "<$0.01" : "$" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const num = (n) => n.toLocaleString(undefined, { maximumFractionDigits: n < 1 ? 6 : 2 });
+const pct = (bps) => bps / 100 + "%";
+const burnToken = () => state.fee?.burnToken;
+const isBurnOut = () => !!burnToken() && state.out.id === burnToken().id;
+const feeOn = () => !!state.fee && !isBurnOut();
+const chips = () => [...DEFAULTS, ...(burnToken() ? [burnToken()] : [])];
 async function api(path, body) {
   const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : undefined);
   let j = null;
@@ -65,12 +70,17 @@ function disconnect() {
 /* ---------- Output token picker ---------- */
 function renderDefaults() {
   const box = $("defaults");
-  box.replaceChildren(...DEFAULTS.map((t) => h("button", { class: "chip", "aria-pressed": String(state.out.id === t.id), onclick: () => setOut(t) }, t.symbol)));
-  if (!DEFAULTS.some((t) => t.id === state.out.id)) box.append(h("button", { class: "chip", "aria-pressed": "true" }, icon(state.out), state.out.symbol));
+  box.replaceChildren(...chips().map((t) => h("button", { class: "chip", "aria-pressed": String(state.out.id === t.id), onclick: () => setOut(t) },
+    t === burnToken() && icon(t), t.symbol, t === burnToken() && h("span", { class: "badge v" }, "no fee"))));
+  if (!chips().some((t) => t.id === state.out.id)) box.append(h("button", { class: "chip", "aria-pressed": "true" }, icon(state.out), state.out.symbol));
   const note = $("out-note");
   note.replaceChildren();
-  if (!state.out.verified) note.append(h("div", { class: "notice warn" }, "This token is not verified by Jupiter. Check the address carefully: ", h("span", { class: "mono" }, state.out.id)));
-  else if (!DEFAULTS.some((t) => t.id === state.out.id)) note.append(h("div", { class: "small muted", style: "margin-top:8px" }, h("span", { class: "mono" }, state.out.id)));
+  if (state.fee) note.append(h("div", { class: "notice " + (feeOn() ? "warn" : "ok") },
+    feeOn() ? `A ${pct(state.fee.bps)} fee applies: it buys $${burnToken().symbol} and burns it in the same transaction. Swap into ${burnToken().symbol} to skip the fee.`
+      : `No fee: you're swapping into $${burnToken().symbol}.`));
+  if (isBurnOut()) note.append(h("div", { class: "small muted", style: "margin-top:8px" }, h("span", { class: "mono" }, state.out.id)));
+  else if (!state.out.verified) note.append(h("div", { class: "notice warn" }, "This token is not verified by Jupiter. Check the address carefully: ", h("span", { class: "mono" }, state.out.id)));
+  else if (!chips().some((t) => t.id === state.out.id)) note.append(h("div", { class: "small muted", style: "margin-top:8px" }, h("span", { class: "mono" }, state.out.id)));
 }
 function setOut(t) { state.out = t; state.plan = null; $("results").classList.add("hidden"); $("q").value = ""; renderDefaults(); renderTokens(); renderPlan(); }
 let searchTimer, searchSeq = 0;
@@ -148,7 +158,7 @@ function renderSummary() {
   const total = sel.reduce((s, r) => s + r.usd, 0);
   $("sum-main").textContent = sel.length ? `${sel.length} token${sel.length > 1 ? "s" : ""} selected · ≈ ${usd(total)}` : "Nothing selected";
   const tooMany = sel.length > MAX_TOKENS;
-  $("sum-sub").textContent = tooMany ? `Up to ${MAX_TOKENS} tokens per run. Untick some, or run it again afterwards.` : sel.length ? `→ ${state.out.symbol}` : "";
+  $("sum-sub").textContent = tooMany ? `Up to ${MAX_TOKENS} tokens per run. Untick some, or run it again afterwards.` : sel.length ? `→ ${state.out.symbol}` + (state.fee ? (feeOn() ? ` · ${pct(state.fee.bps)} buy & burn fee` : " · no fee") : "") : "";
   $("sum-sub").style.color = tooMany ? "var(--warn)" : "";
   $("go").disabled = !sel.length || tooMany || !!state.busy;
 }
@@ -175,17 +185,23 @@ function renderPlan() {
   $("s-plan").classList.toggle("hidden", !p);
   if (!p) return;
   const n = p.txs.length, legs = p.txs.reduce((s, t) => s + t.legs.length, 0);
-  box.replaceChildren(
+  // replaceChildren would print `false` from the conditional entries, so drop them first.
+  box.replaceChildren(...[
     n ? h("p", { style: "margin-top:0" }, `${legs} swap${legs > 1 ? "s" : ""} fit into ${n} transaction${n > 1 ? "s" : ""} (Solana limits each transaction's size). Your wallet will ask you to approve once.`)
       : h("div", { class: "notice bad" }, "Nothing could be swapped."),
+    n > 0 && p.feeApplied && (() => {
+      const f = p.txs.reduce((a, t) => ({ amt: a.amt + (t.fee?.amountIn ?? 0), usd: a.usd + (t.fee?.usd ?? 0), burn: a.burn + (t.fee?.burned ?? 0) }), { amt: 0, usd: 0, burn: 0 });
+      return h("div", { class: "notice warn", style: "margin:0 0 6px" }, `Total fee: ${num(f.amt)} ${state.out.symbol} (${usd(f.usd)}), which buys and burns at least ${num(f.burn)} ${burnToken()?.symbol ?? ""}. Swap into ${burnToken()?.symbol ?? "the burn token"} to skip the fee.`);
+    })(),
     ...p.txs.map((t, i) => h("div", { class: "plan-tx" }, h("b", {}, `Transaction ${i + 1}`), h("span", { class: "small muted" }, ` · ${t.legs.length} swaps`),
       h("div", { class: "small muted" }, t.legs.map((l) => `${label(l.mint)} (${usd(l.usdIn)})`).join(", ")),
+      t.fee && h("div", { class: "small" }, `Fee: ${num(t.fee.amountIn)} ${state.out.symbol} (${usd(t.fee.usd)}) buys and burns ≥ ${num(t.fee.burned)} ${burnToken()?.symbol ?? ""}`),
       h("div", { class: "small", id: "status-" + i })),
     ),
     p.skipped.length > 0 && h("details", { style: "margin-top:10px", open: true }, h("summary", {}, `${p.skipped.length} skipped`),
       p.skipped.map((s) => h("div", { class: "small muted" }, label(s.mint) + ": " + s.reason))),
     n > 0 && h("div", { style: "margin-top:12px" }, h("button", { class: "primary", id: "sign", onclick: signAndSend }, `Sign & send ${n} transaction${n > 1 ? "s" : ""}`)),
-  );
+  ].filter(Boolean));
 }
 const b64ToBytes = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const bytesToB64 = (b) => btoa(String.fromCharCode(...b));
@@ -226,4 +242,12 @@ async function signAndSend() {
   }
 }
 
+function renderFeeFooter() {
+  $("fee-footer").replaceChildren(...(state.fee ? [h("b", {}, "Fee. "),
+    `A ${pct(state.fee.bps)} fee is taken from the minimum guaranteed output of each transaction. In that same transaction it buys $${burnToken().symbol} (`,
+    h("span", { class: "mono" }, burnToken().id), ") and burns it. Nobody receives the fee, and every burn is visible on-chain. Swapping into ",
+    burnToken().symbol + " has no fee."] : []));
+}
+api("/api/config").then((c) => { state.fee = c.fee; renderDefaults(); renderSummary(); renderFeeFooter(); })
+  .catch(() => $("out-note").replaceChildren(h("div", { class: "notice bad" }, "Couldn't load fee settings. Any fee is still shown in the review before you sign.")));
 renderDefaults(); renderWallet(); renderTokens();

@@ -14,6 +14,7 @@ const securityHeaders: [string, string][] = vercel.headers[0].headers.map((x: { 
 const types: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
 
 const routes: Record<string, (req: Request) => Promise<Response>> = {
+  "GET /api/config": h.config,
   "GET /api/holdings": h.holdings,
   "GET /api/tokens/search": h.tokenSearch,
   "POST /api/plan": h.plan,
