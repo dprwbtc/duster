@@ -1,0 +1,6 @@
+.env
+.env.*
+!.env.example
+*.key
+id.json
+node_modules
