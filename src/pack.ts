@@ -179,7 +179,8 @@ export async function finalize(
   let fee: FeeLeg | null;
   try {
     fee = await feeFor(legs);
-  } catch {
+  } catch (e) {
+    console.error(`fee route failed: ${(e as Error).message.slice(0, 300)}`);
     // Never swap without the fee when one applies: if it can't be routed, the swaps don't go ahead.
     return split("buy-and-burn fee couldn't be routed right now; try again shortly");
   }
