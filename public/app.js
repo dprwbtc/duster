@@ -187,13 +187,13 @@ function renderPlan() {
   const n = p.txs.length, legs = p.txs.reduce((s, t) => s + t.legs.length, 0);
   // replaceChildren would print `false` from the conditional entries, so drop them first.
   box.replaceChildren(...[
-    n ? h("p", { style: "margin-top:0" }, `${legs} swap${legs > 1 ? "s" : ""} fit into ${n} transaction${n > 1 ? "s" : ""} (Solana limits each transaction's size). Your wallet will ask you to approve once.`)
+    n ? h("p", { style: "margin-top:0" }, `${legs} swap${legs > 1 ? "s" : ""} fit into ${n} transaction${n > 1 ? "s" : ""} (Solana limits each transaction's size). Your wallet will ask you to approve them in one prompt.`)
       : h("div", { class: "notice bad" }, "Nothing could be swapped."),
     n > 0 && p.feeApplied && (() => {
       const f = p.txs.reduce((a, t) => ({ amt: a.amt + (t.fee?.amountIn ?? 0), usd: a.usd + (t.fee?.usd ?? 0), burn: a.burn + (t.fee?.burned ?? 0) }), { amt: 0, usd: 0, burn: 0 });
       return h("div", { class: "notice warn", style: "margin:0 0 6px" }, `Total fee: ${num(f.amt)} ${state.out.symbol} (${usd(f.usd)}), which buys and burns at least ${num(f.burn)} ${burnToken()?.symbol ?? ""}. Swap into ${burnToken()?.symbol ?? "the burn token"} to skip the fee.`);
     })(),
-    ...p.txs.map((t, i) => h("div", { class: "plan-tx" }, h("b", {}, `Transaction ${i + 1}`), h("span", { class: "small muted" }, ` · ${t.legs.length} swaps`),
+    ...p.txs.map((t, i) => h("div", { class: "plan-tx" }, h("b", {}, `Transaction ${i + 1}`), h("span", { class: "small muted" }, t.legs.length ? ` · ${t.legs.length} swap${t.legs.length > 1 ? "s" : ""}` : " · fee for the swaps above"),
       h("div", { class: "small muted" }, t.legs.map((l) => `${label(l.mint)} (${usd(l.usdIn)})`).join(", ")),
       t.fee && h("div", { class: "small" }, `Fee: ${num(t.fee.amountIn)} ${state.out.symbol} (${usd(t.fee.usd)}) buys and burns ≥ ${num(t.fee.burned)} ${burnToken()?.symbol ?? ""}`),
       h("div", { class: "small", id: "status-" + i })),

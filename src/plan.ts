@@ -1,7 +1,7 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, getMint } from "@solana/spl-token";
 import { getBuild as getBuildOnce, type PriceInfo } from "./jupiter.js";
-import { finalize, groupBySize, type Batch, type FeeBuilder, type FeeLeg, type SwapLeg } from "./pack.js";
+import { feeOnlyBatch, finalize, groupBySize, type Batch, type FeeBuilder, type FeeLeg, type SwapLeg } from "./pack.js";
 import type { Holding } from "./wallet.js";
 
 /** Account caps to try, tightest first: a tight cap packs more swaps per transaction but hides many routes. */
@@ -123,7 +123,34 @@ export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; ski
     for (const l of legs) skipped.push({ mint: l.holding.mint, reason: "buy-and-burn fee couldn't be routed right now; try again shortly" });
     return { batches: [], skipped };
   }
-  const groups = groupBySize(o.owner, legs, o.closeSource, reserve, skipped);
+  const { groups, overflow } = groupBySize(o.owner, legs, o.closeSource, reserve);
   const batches = (await Promise.all(groups.map((g) => finalize(o.connection, o.owner, g, o.closeSource, feeFor, skipped)))).flat();
+
+  if (overflow.length) {
+    // These swaps are too large to share a transaction with the fee. Swap them on their own, then settle
+    // their fee in one extra transaction at the end (the wallet still approves everything in a single prompt).
+    const noFee: FeeBuilder = async () => null;
+    const keepBurnAccount = overflow.some((l) => l.holding.mint === o.fee?.burnMint);
+    const close = o.closeSource && !keepBurnAccount;
+    const { groups: og, overflow: tooBig } = groupBySize(o.owner, overflow, close, null);
+    for (const l of tooBig) skipped.push({ mint: l.holding.mint, reason: "route too large to fit in a transaction" });
+    const extra = (await Promise.all(og.map((g) => finalize(o.connection, o.owner, g, close, noFee, skipped)))).flat();
+    batches.push(...extra);
+    const swapped = extra.flatMap((b) => b.legs);
+    if (swapped.length && feeApplies(o.fee, o.outMint)) {
+      try {
+        const fee = await feeFor(swapped);
+        const feeTx = fee && (await feeOnlyBatch(o.connection, o.owner, fee));
+        if (fee && !feeTx) throw new Error("fee transaction too large");
+        if (feeTx) batches.push(feeTx);
+      } catch (e) {
+        // Never swap without the fee when one applies: drop the swaps that needed it.
+        console.error(`overflow fee failed: ${(e as Error).message.slice(0, 300)}`);
+        const drop = new Set(extra);
+        for (let i = batches.length - 1; i >= 0; i--) if (drop.has(batches[i])) batches.splice(i, 1);
+        for (const l of swapped) skipped.push({ mint: l.holding.mint, reason: "buy-and-burn fee couldn't be routed right now; try again shortly" });
+      }
+    }
+  }
   return { batches, skipped };
 }

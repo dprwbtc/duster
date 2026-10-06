@@ -14,6 +14,7 @@ import type { Holding } from "./wallet.js";
 const MAX_TX_BYTES = 1232;
 const CU_MAX = 1_400_000;
 const SET_COMPUTE_UNIT_PRICE = 3;
+const FEE_ONLY_CU = 500_000;
 
 export interface SwapLeg {
   holding: Holding;
@@ -132,15 +133,16 @@ function fits(tx: VersionedTransaction): boolean {
 /**
  * Greedily group legs so every group fits in a single transaction (1232 bytes).
  * `reserve` is a representative fee leg, so each group leaves room for its own buy-and-burn.
+ * Legs that can't fit even alone are returned as `overflow` for the caller to handle.
  */
 export function groupBySize(
   payer: PublicKey,
   legs: SwapLeg[],
   closeSource: boolean,
   reserve: FeeLeg | null,
-  skipped: { mint: string; reason: string }[] = [],
-): SwapLeg[][] {
+): { groups: SwapLeg[][]; overflow: SwapLeg[] } {
   const groups: SwapLeg[][] = [];
+  const overflow: SwapLeg[] = [];
   let cur: SwapLeg[] = [];
   const dummy = PublicKey.default.toBase58();
   const ok = (g: SwapLeg[]) => fits(compile(payer, g, reserve, closeSource, CU_MAX, dummy));
@@ -150,14 +152,30 @@ export function groupBySize(
     } else {
       if (cur.length) groups.push(cur);
       cur = ok([leg]) ? [leg] : [];
-      if (!cur.length) {
-        console.warn(`  ! ${leg.holding.mint} alone does not fit in a transaction; skipping`);
-        skipped.push({ mint: leg.holding.mint, reason: "route too large to fit in one transaction with the fee" });
-      }
+      if (!cur.length) overflow.push(leg);
     }
   }
   if (cur.length) groups.push(cur);
-  return groups;
+  return { groups, overflow };
+}
+
+/**
+ * A transaction holding only the buy-and-burn fee, for swaps that were too large to carry it themselves.
+ * It runs after those swaps, and can't be simulated up front because the funds it spends don't exist yet.
+ */
+export async function feeOnlyBatch(connection: Connection, payer: PublicKey, fee: FeeLeg): Promise<Batch | null> {
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  const price = fee.build.computeBudgetInstructions.filter((i) => Buffer.from(i.data, "base64")[0] === SET_COMPUTE_UNIT_PRICE).map(toIx);
+  const body = swapInstructions(fee.build, new Set(), { closed: false });
+  const b = fee.burn;
+  if (b.amount > 0n) body.push(createBurnCheckedInstruction(b.account, b.mint, payer, b.amount, b.decimals, [], b.tokenProgram));
+  const msg = new TransactionMessage({
+    payerKey: payer,
+    recentBlockhash: blockhash,
+    instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units: FEE_ONLY_CU }), ...price, ...body],
+  }).compileToV0Message(toAlts(fee.build.addressesByLookupTableAddress));
+  const tx = new VersionedTransaction(msg);
+  return fits(tx) ? { legs: [], fee, tx, blockhash, lastValidBlockHeight } : null;
 }
 
 /**
