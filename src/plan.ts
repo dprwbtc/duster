@@ -1,26 +1,13 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, getMint } from "@solana/spl-token";
-import { getBuild as getBuildOnce, type PriceInfo } from "./jupiter.js";
-import { feeOnlyBatch, finalize, groupBySize, type Batch, type FeeBuilder, type FeeLeg, type SwapLeg } from "./pack.js";
+import { getBuild, type PriceInfo } from "./jupiter.js";
+import { buildOne, fitsOne, type Batch, type FeeBuilder, type FeeLeg, type SwapLeg } from "./pack.js";
 import type { Holding } from "./wallet.js";
 
-/** Account caps to try, tightest first: a tight cap packs more swaps per transaction but hides many routes. */
-const ACCOUNT_CAPS = [20, 30, 40, 50, 64];
-
-/** Try each account cap from the requested one upward; the smallest cap that routes gives the smallest transaction. */
-async function getBuild(apiKey: string, p: Parameters<typeof getBuildOnce>[1]) {
-  const caps = ACCOUNT_CAPS.filter((c) => c >= p.maxAccounts);
-  let last: unknown;
-  for (const maxAccounts of caps) {
-    try {
-      return await getBuildOnce(apiKey, { ...p, maxAccounts });
-    } catch (e) {
-      last = e;
-      console.warn(`build ${p.inputMint} -> ${p.outputMint} failed at maxAccounts=${maxAccounts}: ${(e as Error).message.slice(0, 200)}`);
-    }
-  }
-  throw last;
-}
+/** Account caps for the dust swap, loosest first: looser routes usually price better but make bigger transactions. */
+const DUST_CAPS = [64, 48, 40, 32, 24, 20];
+/** Account caps for the buy-and-burn swap, tightest first, so it leaves the most room for the dust swap. */
+const FEE_CAPS = [24, 32, 40, 48, 64];
 
 /** Buy-and-burn fee: `bps` of each transaction's guaranteed output buys `burnMint`, which is then burned. */
 export interface FeeConfig {
@@ -37,7 +24,7 @@ export interface PlanOptions {
   outInfo: PriceInfo;
   items: { h: Holding; usd: number }[];
   slippageBps: number;
-  maxAccounts: number;
+  maxAccounts: number; // largest route size to try for each dust swap
   maxLoss: number; // fraction, e.g. 0.1
   closeSource: boolean;
   fee?: FeeConfig | null;
@@ -65,92 +52,101 @@ async function makeFeeBuilder(o: PlanOptions): Promise<FeeBuilder> {
   const tokenProgram = info.owner;
   const { decimals } = await getMint(o.connection, mint, "confirmed", tokenProgram);
   const account = getAssociatedTokenAddressSync(mint, o.owner, false, tokenProgram);
+  // Remember the tightest cap that routed, so later tokens in the plan don't retry caps that can't work.
+  let start = 0;
   return async (legs): Promise<FeeLeg | null> => {
     const amountIn = feeAmount(legs, fee.bps);
     if (amountIn === 0n) return null; // too small to charge anything
-    const build = await getBuild(o.apiKey, {
-      inputMint: o.outMint,
-      outputMint: fee.burnMint,
-      amount: amountIn.toString(),
-      taker: o.owner.toBase58(),
-      slippageBps: fee.slippageBps,
-      maxAccounts: o.maxAccounts,
-    });
-    // Burn the minimum the swap guarantees; any extra from positive slippage stays with the user.
-    return { build, amountIn, burn: { mint, account, amount: BigInt(build.otherAmountThreshold), decimals, tokenProgram } };
+    let last: unknown;
+    for (let i = start; i < FEE_CAPS.length; i++) {
+      try {
+        const build = await getBuild(o.apiKey, {
+          inputMint: o.outMint,
+          outputMint: fee.burnMint,
+          amount: amountIn.toString(),
+          taker: o.owner.toBase58(),
+          slippageBps: fee.slippageBps,
+          maxAccounts: FEE_CAPS[i],
+        });
+        start = i;
+        // Burn the minimum the swap guarantees; any extra from positive slippage stays with the user.
+        return { build, amountIn, burn: { mint, account, amount: BigInt(build.otherAmountThreshold), decimals, tokenProgram } };
+      } catch (e) {
+        last = e;
+      }
+    }
+    throw last;
   };
 }
 
-/** Quote each token, drop bad routes, pack into transactions, simulate. Returns unsigned batches. */
+/** Blockhashes last ~60s; share one across tokens planned close together, but don't let it go stale. */
+function blockhashCache(connection: Connection) {
+  let cached: { at: number; value: Promise<{ blockhash: string; lastValidBlockHeight: number }> } | null = null;
+  return () => {
+    if (!cached || Date.now() - cached.at > 10_000) cached = { at: Date.now(), value: connection.getLatestBlockhash("confirmed") };
+    return cached.value;
+  };
+}
+
+/**
+ * Build one transaction per token: its swap plus its own buy-and-burn, so the fee is atomic with the swap.
+ * The wallet signs them all in one prompt. Returns unsigned, simulated batches and the tokens that were skipped.
+ */
 export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; skipped: Skipped[] }> {
   const skipped: Skipped[] = [];
-  const legs: SwapLeg[] = [];
+  const batches: Batch[] = [];
+  const feeFor: FeeBuilder = await makeFeeBuilder(o);
+  const recent = blockhashCache(o.connection);
+  const caps = DUST_CAPS.filter((c) => c <= o.maxAccounts);
+  if (!caps.length) caps.push(o.maxAccounts);
   const queue = [...o.items];
+
+  const planOne = async (c: (typeof o.items)[number]) => {
+    let feeProbe: FeeLeg | null | undefined; // last fee leg built, reused to size-check tighter routes cheaply
+    for (const cap of caps) {
+      let leg: SwapLeg;
+      try {
+        const build = await getBuild(o.apiKey, {
+          inputMint: c.h.mint,
+          outputMint: o.outMint,
+          amount: c.h.rawAmount.toString(),
+          taker: o.owner.toBase58(),
+          slippageBps: o.slippageBps,
+          maxAccounts: cap,
+        });
+        leg = { holding: c.h, build, usdIn: c.usd };
+      } catch (e) {
+        // Tighter caps only remove routes, so there's no point retrying lower.
+        console.error(`no route for ${c.h.mint} at maxAccounts=${cap}: ${(e as Error).message.slice(0, 300)}`);
+        return skipped.push({ mint: c.h.mint, reason: `no route: ${(e as Error).message.slice(0, 120)}` });
+      }
+      const outUsd = (Number(leg.build.outAmount) / 10 ** o.outInfo.decimals) * o.outInfo.usdPrice;
+      if (outUsd < c.usd * (1 - o.maxLoss))
+        return skipped.push({ mint: c.h.mint, reason: `route returns $${outUsd.toFixed(4)} for $${c.usd.toFixed(4)} (> ${Math.round(o.maxLoss * 100)}% loss)` });
+      if (feeProbe !== undefined && !fitsOne(o.owner, leg, feeProbe, o.closeSource)) continue;
+
+      let fee: FeeLeg | null;
+      try {
+        fee = feeProbe = await feeFor([leg]);
+      } catch (e) {
+        // Never swap without the fee when one applies.
+        console.error(`fee route failed for ${c.h.mint}: ${(e as Error).message.slice(0, 300)}`);
+        return skipped.push({ mint: c.h.mint, reason: "buy-and-burn fee couldn't be routed right now; try again shortly" });
+      }
+      const r = await buildOne(o.connection, o.owner, leg, fee, o.closeSource, await recent());
+      if ("batch" in r) return batches.push(r.batch);
+      if ("error" in r) return skipped.push({ mint: c.h.mint, reason: r.error });
+    }
+    skipped.push({ mint: c.h.mint, reason: "route too large to fit in one transaction with its buy-and-burn" });
+  };
+
   await Promise.all(
     Array.from({ length: 3 }, async () => {
-      for (let c; (c = queue.shift()); ) {
-        try {
-          const build = await getBuild(o.apiKey, {
-            inputMint: c.h.mint,
-            outputMint: o.outMint,
-            amount: c.h.rawAmount.toString(),
-            taker: o.owner.toBase58(),
-            slippageBps: o.slippageBps,
-            maxAccounts: o.maxAccounts,
-          });
-          const outUsd = (Number(build.outAmount) / 10 ** o.outInfo.decimals) * o.outInfo.usdPrice;
-          if (outUsd < c.usd * (1 - o.maxLoss)) {
-            skipped.push({ mint: c.h.mint, reason: `route returns $${outUsd.toFixed(4)} for $${c.usd.toFixed(4)} (> ${Math.round(o.maxLoss * 100)}% loss)` });
-            continue;
-          }
-          legs.push({ holding: c.h, build, usdIn: c.usd });
-        } catch (e) {
-          console.error(`no route for ${c.h.mint}: ${(e as Error).message.slice(0, 300)}`);
-          skipped.push({ mint: c.h.mint, reason: `no route: ${(e as Error).message.slice(0, 120)}` });
-        }
-      }
+      for (let c; (c = queue.shift()); ) await planOne(c);
     }),
   );
-  if (!legs.length) return { batches: [], skipped };
-
-  const feeFor = await makeFeeBuilder(o);
-  // Quote the fee once on everything so packing leaves room for each transaction's buy-and-burn.
-  let reserve: FeeLeg | null;
-  try {
-    reserve = await feeFor(legs);
-  } catch (e) {
-    console.error(`fee route failed: ${(e as Error).message.slice(0, 300)}`);
-    for (const l of legs) skipped.push({ mint: l.holding.mint, reason: "buy-and-burn fee couldn't be routed right now; try again shortly" });
-    return { batches: [], skipped };
-  }
-  const { groups, overflow } = groupBySize(o.owner, legs, o.closeSource, reserve);
-  const batches = (await Promise.all(groups.map((g) => finalize(o.connection, o.owner, g, o.closeSource, feeFor, skipped)))).flat();
-
-  if (overflow.length) {
-    // These swaps are too large to share a transaction with the fee. Swap them on their own, then settle
-    // their fee in one extra transaction at the end (the wallet still approves everything in a single prompt).
-    const noFee: FeeBuilder = async () => null;
-    const keepBurnAccount = overflow.some((l) => l.holding.mint === o.fee?.burnMint);
-    const close = o.closeSource && !keepBurnAccount;
-    const { groups: og, overflow: tooBig } = groupBySize(o.owner, overflow, close, null);
-    for (const l of tooBig) skipped.push({ mint: l.holding.mint, reason: "route too large to fit in a transaction" });
-    const extra = (await Promise.all(og.map((g) => finalize(o.connection, o.owner, g, close, noFee, skipped)))).flat();
-    batches.push(...extra);
-    const swapped = extra.flatMap((b) => b.legs);
-    if (swapped.length && feeApplies(o.fee, o.outMint)) {
-      try {
-        const fee = await feeFor(swapped);
-        const feeTx = fee && (await feeOnlyBatch(o.connection, o.owner, fee));
-        if (fee && !feeTx) throw new Error("fee transaction too large");
-        if (feeTx) batches.push(feeTx);
-      } catch (e) {
-        // Never swap without the fee when one applies: drop the swaps that needed it.
-        console.error(`overflow fee failed: ${(e as Error).message.slice(0, 300)}`);
-        const drop = new Set(extra);
-        for (let i = batches.length - 1; i >= 0; i--) if (drop.has(batches[i])) batches.splice(i, 1);
-        for (const l of swapped) skipped.push({ mint: l.holding.mint, reason: "buy-and-burn fee couldn't be routed right now; try again shortly" });
-      }
-    }
-  }
+  // Keep the order the user saw.
+  const order = new Map(o.items.map((c, i) => [c.h.mint, i]));
+  batches.sort((a, b) => order.get(a.legs[0].holding.mint)! - order.get(b.legs[0].holding.mint)!);
   return { batches, skipped };
 }

@@ -9,7 +9,7 @@ import { feeApplies, planSwaps, type FeeConfig } from "./plan.js";
 
 const SOL = "So11111111111111111111111111111111111111112";
 const MAX_TOKENS_PER_PLAN = 30; // each token costs a Jupiter /build call plus simulations
-const MAX_TXS_PER_SEND = 20;
+const MAX_TXS_PER_SEND = 30; // one transaction per token, so this matches MAX_TOKENS_PER_PLAN
 const MAX_TX_BYTES = 1232;
 
 class HttpError extends Error {
@@ -186,7 +186,7 @@ export const plan = wrap(async (req) => {
     outInfo: outPrice,
     items,
     slippageBps,
-    maxAccounts: 20,
+    maxAccounts: 64,
     maxLoss,
     closeSource: b.closeAccounts !== false,
     fee: feeConfig(),
@@ -235,34 +235,17 @@ export const send = wrap(async (req) => {
     return raw;
   });
   const { connection } = env();
-  const sigs: (string | { error: string })[] = [];
-  // Later transactions (e.g. a fee swap) can depend on funds from earlier ones, so on a simulation failure
-  // wait for what was already sent to confirm, then try once more.
-  const settle = async () => {
-    const sent = sigs.filter((s): s is string => typeof s === "string");
-    for (let i = 0; i < 15 && sent.length; i++) {
-      const { value } = await connection.getSignatureStatuses(sent);
-      if (value.every((v) => v?.err || v?.confirmationStatus === "confirmed" || v?.confirmationStatus === "finalized")) return;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  };
-  for (const raw of raws) {
-    try {
-      sigs.push(await connection.sendRawTransaction(raw, { maxRetries: 3 }));
-    } catch (e) {
-      if (!/blockhash/i.test(String(e)) && sigs.length) {
-        try {
-          await settle();
-          sigs.push(await connection.sendRawTransaction(raw, { maxRetries: 3 }));
-          continue;
-        } catch (e2) {
-          e = e2;
-        }
+  // Each transaction stands alone (its own swap and buy-and-burn), so they can go out together.
+  const sigs = await Promise.all(
+    raws.map(async (raw: Buffer): Promise<string | { error: string }> => {
+      try {
+        return await connection.sendRawTransaction(raw, { maxRetries: 3 });
+      } catch (e) {
+        console.error(e);
+        return { error: /blockhash/i.test(String(e)) ? "expired, please preview again" : "rejected by the network (simulation failed)" };
       }
-      console.error(e);
-      sigs.push({ error: /blockhash/i.test(String(e)) ? "expired, please preview again" : "rejected by the network (simulation failed)" });
-    }
-  }
+    }),
+  );
   return sigs;
 });
 

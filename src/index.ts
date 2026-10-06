@@ -17,7 +17,7 @@ const { values: a } = parseArgs({
     "min-usd": { type: "string", default: "0" },
     slippage: { type: "string", default: "100" }, // bps
     "max-loss-pct": { type: "string", default: "10" }, // skip routes losing more than this vs. oracle price
-    "max-accounts": { type: "string", default: "20" }, // smaller routes => more swaps per tx
+    "max-accounts": { type: "string", default: "64" }, // largest route to try per swap; tighter routes are tried if a tx is too big
     exclude: { type: "string", default: "" }, // comma-separated mints to leave alone
     only: { type: "string", default: "" }, // comma-separated mints to swap exclusively
     "no-close": { type: "boolean", default: false }, // keep emptied token accounts
@@ -71,7 +71,7 @@ for (const h of holdings) {
 console.log(`\n${candidates.length} dust token(s) ≤ $${maxUsd}:`);
 for (const c of candidates) console.log(`  ${c.h.mint}  ${c.h.uiAmount}  ≈ $${c.usd.toFixed(4)}`);
 
-// 2-3. Quote, pack into as few transactions as fit, simulate, drop tokens that fail.
+// 2-3. Quote, one transaction per token, simulate, drop tokens that fail.
 const { batches, skipped: planSkipped } = await planSwaps({
   connection,
   apiKey,

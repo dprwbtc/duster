@@ -1,7 +1,7 @@
 # Duster
 
-Swap many dust tokens into one asset (SOL by default) using Jupiter Swap V2 `/build`,
-packing as many swaps as fit into each transaction.
+Swap many dust tokens into one asset (SOL by default) using Jupiter Swap V2 `/build`:
+one transaction per token, all approved in a single wallet prompt.
 
 ```bash
 cp .env.example .env   # fill in JUPITER_API_KEY, RPC_URL, KEYPAIR_PATH
@@ -15,10 +15,13 @@ Flags: `--to`, `--max-usd`, `--min-usd`, `--slippage` (bps), `--max-loss-pct`, `
 `--exclude`, `--only`, `--no-close`, `--execute`, `--yes`.
 
 Notes
-- A Solana tx is limited to 1232 bytes, so "one transaction" means *as few as fit* (usually several swaps each).
+- One transaction per token, like the old BONKscooper. A Solana tx is limited to 1232 bytes and 64 accounts, so
+  each swap first tries Jupiter's widest routes (`--max-accounts`, default 64, usually the best price) and only
+  falls back to tighter routes when the transaction wouldn't fit.
 - Tokens with no reliable Jupiter price are never touched. Routes losing >`--max-loss-pct` vs. oracle price are skipped.
 - Emptied source token accounts are closed to reclaim rent unless `--no-close`.
-- Each tx is simulated; if one fails, the batch is bisected so a single bad token doesn't block the rest.
+- Each tx is simulated; a token that fails is skipped without blocking the rest. If an emptied account can't be
+  closed (e.g. Token-2022 with withheld transfer fees), the swap goes ahead and the account is kept.
 
 ## Web UI (local)
 
@@ -57,12 +60,12 @@ Layout: `public/` is the static site, `api/*.ts` are Vercel Functions, `src/` is
 
 ### Buy-and-burn fee
 
-When `BURN_TOKEN_MINT` is set, each transaction ends with two extra steps. The first swaps `FEE_BPS` of that
-transaction's **minimum guaranteed output** into the burn token. The second burns what the swap guarantees,
+When `BURN_TOKEN_MINT` is set, each token's transaction ends with two extra steps. The first swaps `FEE_BPS` of
+that swap's **minimum guaranteed output** into the burn token. The second burns what the swap guarantees,
 reducing the token's supply. Any extra from positive slippage stays with the user.
 
-- **Atomic:** if any swap in the transaction fails, the fee doesn't happen either. Users are never charged
-  for a failed swap.
+- **Atomic:** the swap, its fee swap and the burn are in the same transaction, so they all happen or none do.
+  Users are never charged for a failed swap, and a swap never goes through without its burn.
 - **Non-custodial:** you never receive or hold the fee, and no server wallet or cron job is involved. Every
   burn is a public on-chain instruction anyone can verify.
 - **No fee into the burn token:** when the user swaps into the burn token itself, no fee is added.
@@ -70,7 +73,8 @@ reducing the token's supply. Any extra from positive slippage stays with the use
   moment), those swaps are skipped with a "try again" message. They never go through without the fee.
 - **Disclosed up front:** the UI shows the fee before preview, in the bottom bar, per transaction, and as a
   total in the review, plus the burn token's full mint address.
-- **Costs space:** each transaction carries an extra swap, so it fits about one to two fewer dust tokens.
+- **Costs space:** the fee swap shares the transaction with the dust swap, so some dust swaps use a tighter
+  route (slightly worse price) to make room. Into SOL there's plenty of room; into USDC it's tighter.
 - **CLI exempt:** the CLI (`npm start`) is your personal tool and never charges the fee.
 
 ### What protects users
@@ -83,7 +87,7 @@ reducing the token's supply. Any extra from positive slippage stays with the use
   signing.
 - Strict Content-Security-Policy (scripts only from this site), `frame-ancestors 'none'` against
   clickjacking. Token names are rendered as text, never HTML.
-- Input validation and size caps on every endpoint (30 tokens per plan, 10 transactions per send). `/api/send`
+- Input validation and size caps on every endpoint (30 tokens per plan, 30 transactions per send). `/api/send`
   only relays fully signed, well-formed transactions. Errors are returned to the browser as generic messages.
 
 ### What's still on you
