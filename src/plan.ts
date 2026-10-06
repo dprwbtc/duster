@@ -4,18 +4,22 @@ import { getBuild as getBuildOnce, type PriceInfo } from "./jupiter.js";
 import { finalize, groupBySize, type Batch, type FeeBuilder, type FeeLeg, type SwapLeg } from "./pack.js";
 import type { Holding } from "./wallet.js";
 
-/** Loosest account cap Jupiter allows; a tight cap packs more swaps per transaction but hides many routes. */
-const WIDE_MAX_ACCOUNTS = 64;
+/** Account caps to try, tightest first: a tight cap packs more swaps per transaction but hides many routes. */
+const ACCOUNT_CAPS = [20, 30, 40, 50, 64];
 
-/** Try the requested account cap first, then retry once with a wide cap before giving up on a route. */
+/** Try each account cap from the requested one upward; the smallest cap that routes gives the smallest transaction. */
 async function getBuild(apiKey: string, p: Parameters<typeof getBuildOnce>[1]) {
-  try {
-    return await getBuildOnce(apiKey, p);
-  } catch (e) {
-    if (p.maxAccounts >= WIDE_MAX_ACCOUNTS) throw e;
-    console.warn(`build ${p.inputMint} -> ${p.outputMint} failed at maxAccounts=${p.maxAccounts}, retrying wide: ${(e as Error).message.slice(0, 200)}`);
-    return getBuildOnce(apiKey, { ...p, maxAccounts: WIDE_MAX_ACCOUNTS });
+  const caps = ACCOUNT_CAPS.filter((c) => c >= p.maxAccounts);
+  let last: unknown;
+  for (const maxAccounts of caps) {
+    try {
+      return await getBuildOnce(apiKey, { ...p, maxAccounts });
+    } catch (e) {
+      last = e;
+      console.warn(`build ${p.inputMint} -> ${p.outputMint} failed at maxAccounts=${maxAccounts}: ${(e as Error).message.slice(0, 200)}`);
+    }
   }
+  throw last;
 }
 
 /** Buy-and-burn fee: `bps` of each transaction's guaranteed output buys `burnMint`, which is then burned. */
@@ -119,7 +123,7 @@ export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; ski
     for (const l of legs) skipped.push({ mint: l.holding.mint, reason: "buy-and-burn fee couldn't be routed right now; try again shortly" });
     return { batches: [], skipped };
   }
-  const groups = groupBySize(o.owner, legs, o.closeSource, reserve);
+  const groups = groupBySize(o.owner, legs, o.closeSource, reserve, skipped);
   const batches = (await Promise.all(groups.map((g) => finalize(o.connection, o.owner, g, o.closeSource, feeFor, skipped)))).flat();
   return { batches, skipped };
 }

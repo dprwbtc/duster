@@ -133,7 +133,13 @@ function fits(tx: VersionedTransaction): boolean {
  * Greedily group legs so every group fits in a single transaction (1232 bytes).
  * `reserve` is a representative fee leg, so each group leaves room for its own buy-and-burn.
  */
-export function groupBySize(payer: PublicKey, legs: SwapLeg[], closeSource: boolean, reserve: FeeLeg | null): SwapLeg[][] {
+export function groupBySize(
+  payer: PublicKey,
+  legs: SwapLeg[],
+  closeSource: boolean,
+  reserve: FeeLeg | null,
+  skipped: { mint: string; reason: string }[] = [],
+): SwapLeg[][] {
   const groups: SwapLeg[][] = [];
   let cur: SwapLeg[] = [];
   const dummy = PublicKey.default.toBase58();
@@ -144,7 +150,10 @@ export function groupBySize(payer: PublicKey, legs: SwapLeg[], closeSource: bool
     } else {
       if (cur.length) groups.push(cur);
       cur = ok([leg]) ? [leg] : [];
-      if (!cur.length) console.warn(`  ! ${leg.holding.mint} alone does not fit in a transaction; skipping`);
+      if (!cur.length) {
+        console.warn(`  ! ${leg.holding.mint} alone does not fit in a transaction; skipping`);
+        skipped.push({ mint: leg.holding.mint, reason: "route too large to fit in one transaction with the fee" });
+      }
     }
   }
   if (cur.length) groups.push(cur);
