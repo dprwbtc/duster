@@ -5,7 +5,9 @@
                       /api/plan and /api/refresh run against real data. It never signs: its signTransaction shows a
                       clearly labelled simulated prompt and hands the transactions back unsigned. /api/send and
                       /api/status are always answered from fixtures here, so nothing can reach the chain.
-   ?demo              Everything from fixtures, plus a "states" popover that jumps to any scene or state.
+   ?demo              Everything from fixtures, plus a "states" popover that jumps to any scene or state, the
+                      cleanup (rent reclaim) included. A few fixtures use real mints so /api/img shows real images.
+   ?watch also reads the real /api/accounts and builds + simulates real /api/reclaim transactions.
    &outcome=success|partial|expired   send outcome for the simulation (also switchable in the simulated prompt)
    &fee=off           demo only: the no-fee deployment */
 
@@ -47,7 +49,7 @@ const PRICES = { [SOL]: 152.4, [USDC]: 1, [USDT]: 1, [BURN]: 0.0000156 };
 const T = (symbol, name, usd, amount, x = {}) => ({ mint: x.mint || fakeKey("m" + symbol + name), amount, frozen: !!x.frozen, usd, price: usd == null ? null : usd / amount, symbol, name, icon: x.icon ?? null, verified: !!x.verified, _loss: x.loss ?? 0.02, _skip: x.skip || null });
 const HOLDINGS = {
   normal: () => [
-    T("ALEIAH", "Aleiah", 1.0, 18402.11, { verified: true, loss: 0.012 }),
+    T("ALEIAH", "Aleiah", 1.0, 18402.11, { verified: true, loss: 0.012, mint: "24LebpSeoudMyGAt4wQ1J2gjJcAjCEMssQWtmyJvpump" }),
     T("Anon", "Anon", 0.99, 3120.5, { loss: 0.018, icon: "https://example.invalid/broken-icon.png" }),
     T("a/autism", "autism", 0.68, 912400, { loss: 0.026 }),
     T("ALLINU", "All Inu", 0.55, 41200000, { loss: 0.031 }),
@@ -60,7 +62,7 @@ const HOLDINGS = {
     T("ALLCAT", "All Cat", 0.004, 1204000, { skip: "no route: /swap/v2/build 400: no route" }),
     T("ALLDOG", "All Dog", 0.002, 990000, { loss: 0.23 }),
     T("FRZN", "Frozen Thing", 0.3, 120, { frozen: true }),
-    T("JUP", "Jupiter", 41.2, 58.1, { verified: true, loss: 0.004 }),
+    T("JUP", "Jupiter", 41.2, 58.1, { verified: true, loss: 0.004, mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN" }),
     T("LILVADER", "Lil Vader", 3.12, 200000, { verified: true, loss: 0.01, mint: BURN }),
     T("<b>FREE</b>", "Claim 5,000 USDC at fr33-usdc.xyz <img src=x onerror=alert(1)>", null, 5000),
     T("SPAM42", "spam", null, 1e9),
@@ -74,6 +76,61 @@ const HOLDINGS = {
     });
   },
   empty: () => [],
+};
+// the cleanup: every token account, empty ones included. Real mints where a real image helps the demo.
+const RENT = 2039280, RENT22 = 2074080;
+const AC = (symbol, name, x = {}) => {
+  const rent = x.t22 ? RENT22 : RENT, amount = x.amount ? String(x.amount) : "0";
+  const blocked = x.frozen ? "frozen" : x.foreign ? "close authority is someone else" : null;
+  const closable = !blocked && (amount === "0" || !!x.native);
+  return {
+    address: fakeKey("acct" + symbol + name + (x.n ?? "")), mint: x.mint || fakeKey("m" + symbol + name), program: x.t22 ? "token-2022" : "token",
+    amount, decimals: x.decimals ?? 6, uiAmount: x.ui ?? 0, frozen: !!x.frozen, native: !!x.native, rentLamports: rent, lamports: rent + (x.wrapped || 0),
+    closeAuthority: x.foreign ? fakeKey("auth" + symbol) : null, closable, reason: blocked || (closable ? undefined : "has balance"),
+    // like the server: never NFTs (decimals 0) or the burn token; priced only when the page asks with prices=1
+    burnCandidate: !blocked && amount !== "0" && !x.native && (x.decimals ?? 6) > 0 && x.mint !== BURN, withheld: !!x.withheld,
+    symbol, name, verified: !!x.verified, _usd: x.usd ?? null, _skip: x.skip || null,
+  };
+};
+// what /api/accounts answers: prices (and so "burnable") only with prices=1
+const priced = (a, withPrices) => ({ ...a, usd: withPrices && a.burnCandidate ? a._usd : null, burnable: withPrices && a.burnCandidate && (a._usd == null || a._usd < 1) });
+const EMPTY_SET = [
+  ["BONK", "Bonk", { mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", verified: true }],
+  ["WIF", "dogwifhat", { mint: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", verified: true }],
+  ["USDC", "USD Coin", { mint: USDC, verified: true }],
+  ["ALEIAH", "Aleiah", { mint: "24LebpSeoudMyGAt4wQ1J2gjJcAjCEMssQWtmyJvpump" }],
+  ["PEPE2", "pepe two", {}], ["MOON", "moon token", {}], ["GLIZ", "glizzy", {}],
+  ["HAWK", "hawk", { t22: true }], ["FEES", "Fee Token", { t22: true, withheld: true }], ["RIZZ", "rizz", {}],
+  ["SNEK", "snek", { skip: "it still holds tokens" }], ["ZAP", "zap", {}],
+  [null, null, {}], ["Visit claim-sol.app", "Claim 2 SOL at claim-sol.app", {}],
+];
+const ACCOUNTS = {
+  normal: () => [
+    AC("SOL", "Wrapped SOL", { native: true, amount: 12300000, ui: 0.0123, wrapped: 12300000, mint: SOL, verified: true }),
+    ...EMPTY_SET.map(([s, n, x], i) => AC(s, n, { ...x, n: i })),
+    AC("DEAD", "dead coin", { amount: 120000, ui: 120000 }),
+    AC("TINY", "tiny", { amount: 5000, ui: 5000, usd: 0.04 }),
+    AC("Free Airdrop", "Free airdrop at www.drop-xyz.top", { amount: 1e9, ui: 1000 }),
+    AC("FRZN", "Frozen Thing", { frozen: true, amount: 120, ui: 120, usd: 0.3 }),
+    AC("BOT", "bot account", { foreign: true }),
+    AC("APE", "Lil Ape #4412", { amount: 1, ui: 1, decimals: 0 }),
+    AC("SPCX", "spacex dust", { amount: 870000, ui: 0.87, usd: 0.87 }),
+    AC("JUP", "Jupiter", { mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", amount: 58100000, ui: 58.1, usd: 41.2, verified: true }),
+    AC("LILVADER", "Lil Vader", { mint: BURN, amount: 2e11, ui: 200000, usd: 3.12, verified: true, t22: true }),
+  ],
+  many: () => [
+    ...Array.from({ length: 130 }, (_, i) => AC(["PEP", "DOG", "CAT", "WIF", "GM", "BRO", "FROG", "MEME", "DUST", "BUN"][i % 10] + (i >= 10 ? i : ""), "coin " + i, { n: "m" + i })),
+    AC("JUP", "Jupiter", { mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", amount: 58100000, ui: 58.1, usd: 41.2, verified: true }),
+  ],
+  blocked: () => [
+    AC("BOT", "bot account", { foreign: true }),
+    AC("FRZN", "Frozen Thing", { frozen: true }),
+    AC("JUP", "Jupiter", { mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", amount: 58100000, ui: 58.1, usd: 41.2, verified: true }),
+  ],
+  none: () => [
+    AC("JUP", "Jupiter", { mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", amount: 58100000, ui: 58.1, usd: 41.2, verified: true }),
+    AC("MOTH", "Moth", { amount: 96200000, ui: 96.2, usd: 1.74, verified: true }),
+  ],
 };
 const CATALOG = [
   { symbol: "JUP", name: "Jupiter", verified: true, usdPrice: 0.71 },
@@ -129,7 +186,7 @@ export async function init(app, params) {
   const dev = {
     simulated: true,
     outcome: ["success", "partial", "expired"].includes(params.get("outcome")) ? params.get("outcome") : "success",
-    holdings: "normal", planDelay: 1300, statusDelay: [900, 3600], autoApprove: null, hideWallets: false,
+    holdings: "normal", accounts: "normal", planDelay: 1300, statusDelay: [900, 3600], autoApprove: null, hideWallets: false,
     sends: new Map(), // sig -> { fate, readyAt }
   };
   const feeOff = mode === "demo" && params.get("fee") === "off";
@@ -165,8 +222,11 @@ export async function init(app, params) {
   function simPrompt(inputs) {
     return new Promise((resolve, reject) => {
       simResolve = (ok) => (ok ? resolve(inputs.map((i) => ({ signedTransaction: i.transaction }))) : reject(Object.assign(new Error("User rejected the request."), { code: 4001 })));
-      const p = app.state.plan, n = inputs.length, o = p?.out;
+      const rcPlan = app.state.signing === "reclaim" ? app.state.rc.plan : null;
+      const p = rcPlan ? null : app.state.plan, n = inputs.length, o = p?.out;
       const recv = (p?.txs || []).reduce((a, t) => a + t.legs.reduce((x, l) => x + l.outAmount, 0) - (t.fee?.amountIn || 0), 0);
+      const rcBack = rcPlan ? rcPlan.txs.reduce((a, t) => a + t.lamports, 0) / 1e9 : 0;
+      const rcBurns = rcPlan ? rcPlan.txs.flatMap((t) => t.accounts.filter((a) => a.action !== "close")) : [];
       const sym = (m) => app.state.rows.find((r) => r.mint === m)?.symbol || m.slice(0, 4) + "…";
       const outcomeBtns = [["success", "all confirm"], ["partial", "some fail"], ["expired", "all expire"]].map(([k, l]) =>
         h("button", { type: "button", "aria-pressed": String(dev.outcome === k), onclick: (e) => { dev.outcome = k; [...e.currentTarget.parentElement.children].forEach((b) => b.setAttribute("aria-pressed", String(b === e.currentTarget))); } }, l));
@@ -178,6 +238,9 @@ export async function init(app, params) {
           h("p", { class: "sim-warn" }, "Dev mode: nothing is signed. Approving hands the transactions back unsigned and the send and confirmations are simulated from fixtures. Nothing reaches the chain."),
           h("ul", { class: "sim-changes" },
             (p?.txs || []).flatMap((t) => t.legs.map((l) => h("li", {}, h("span", { class: "neg" }, `− ${sym(l.mint)}`), h("span", { class: "muted" }, "$" + l.usdIn.toFixed(2))))),
+            rcPlan && h("li", {}, h("span", { class: "pos" }, `+${rcBack.toFixed(5)} SOL`), h("span", { class: "muted" }, "rent back")),
+            rcPlan && h("li", {}, h("span", { class: "muted" }, `closes ${rcPlan.txs.reduce((a, t) => a + t.accounts.length, 0)} token accounts`), h("span", { class: "muted" }, "")),
+            rcBurns.map((a) => h("li", {}, h("span", { class: "neg" }, `− ${a.symbol || a.mint.slice(0, 4) + "…"}`), h("span", { class: "muted" }, "burned"))),
             o && h("li", {}, h("span", { class: "pos" }, `+${recv.toPrecision(4)} ${o.symbol}`), h("span", { class: "muted" }, p.feeApplied ? "after fee" : "")),
             p?.feeApplied && h("li", {}, h("span", { class: "muted" }, "burn token"), h("span", { class: "muted" }, "+0 (bought & burned)"))),
           h("p", { class: "sim-label" }, "simulated outcome"),
@@ -215,6 +278,15 @@ export async function init(app, params) {
       return CATALOG.filter((t) => t.symbol.toLowerCase().includes(q) || t.name.toLowerCase().includes(q) || t.id.toLowerCase().startsWith(q));
     }
     if (route === "/api/plan") return fakePlan(body, signal);
+    if (route === "/api/accounts") {
+      if (dev.accounts === "slow") await sleep(30_000, signal);
+      await sleep(500, signal);
+      if (dev.accounts === "error") throw new DevApiError("Duster is busy right now. Try again when the timer runs out.", 429);
+      const withPrices = url.searchParams.get("prices") === "1";
+      if (withPrices) await sleep(700, signal);
+      return { accounts: (ACCOUNTS[dev.accounts] || ACCOUNTS.normal)().map((a) => priced(a, withPrices)).map(({ _skip, _usd, ...a }) => a), priced: withPrices, priceError: false };
+    }
+    if (route === "/api/reclaim") return fakeReclaim(body, signal);
     if (route === "/api/refresh") { await sleep(250, signal); return { txs: body.txs, lastValidBlockHeight: 1_000_000 }; }
     return undefined;
   };
@@ -239,6 +311,27 @@ export async function init(app, params) {
       txs.push({ tx: randB64(420), bytes: 420, legs: [{ mint, usdIn: r.usd, outAmount, minOut }], fee });
     }
     return { skipped, feeApplied, burnMint: feeApplied ? BURN : null, outPrice, txs };
+  }
+  // about 20 closes per "transaction", like the real packing; fixtures marked _skip are skipped with that reason
+  async function fakeReclaim(b, signal) {
+    await sleep(dev.planDelay, signal);
+    const all = [...ACCOUNTS.normal(), ...ACCOUNTS.many(), ...ACCOUNTS.none()];
+    const skipped = [], ok = [];
+    for (const [addr, burn] of [...(b.close || []).map((a) => [a, false]), ...(b.burn || []).map((a) => [a, true])]) {
+      const a = all.find((x) => x.address === addr);
+      if (!a) skipped.push({ address: addr, reason: "not a token account (already closed?)" });
+      else if (a._skip) skipped.push({ address: addr, reason: a._skip });
+      else if (!burn && !a.closable) skipped.push({ address: addr, reason: a.reason || "it still holds tokens" });
+      else if (burn && a.amount !== "0" && !a.burnCandidate) skipped.push({ address: addr, reason: a.decimals === 0 ? "it looks like an NFT or collectible (no decimals), so it's never burned here" : "that's the burn token; keep it or sell it instead" });
+      else if (burn && a._usd != null && a._usd >= 1) skipped.push({ address: addr, reason: `worth about $${a._usd.toFixed(2)}, so it's not burned; sell it instead` });
+      else ok.push({ address: a.address, mint: a.mint, action: burn ? "burn+close" : "close", rentLamports: a.rentLamports, lamports: a.lamports, native: a.native, uiAmount: a.uiAmount });
+    }
+    const txs = [];
+    for (let i = 0; i < ok.length; i += 20) {
+      const accounts = ok.slice(i, i + 20);
+      txs.push({ tx: randB64(900), bytes: 900 + accounts.length * 10, accounts, rentLamports: accounts.reduce((s, a) => s + a.rentLamports, 0), lamports: accounts.reduce((s, a) => s + a.lamports, 0), feeLamports: 5_200 });
+    }
+    return { txs, skipped, blockhash: "fixture", lastValidBlockHeight: 1_000_000, cuPrice: 50_000 };
   }
   function fakeSend(b) {
     const n = b.txs.length, now = Date.now();
@@ -279,9 +372,11 @@ export async function init(app, params) {
     closeSim(false);
     app.closeAllPops(); app.clearToasts(); app.hideCinema(true); app.stopRing();
     const d = document.getElementById("walletDlg"); if (d.open) d.close();
+    s.rc?.building?.ctrl?.abort();
+    s.rc = app.rcFresh(); s.signing = null; s.intent = null;
     s.busy = null; s.building = null; s.connecting = false; s.connectingSilent = false; s.plan = null; s.run = null; s.stale = false; s.staleWhy = null; s.notice = null; s.pendingAccounts = null; s.tempLoss = null;
     document.getElementById("main").inert = false;
-    dev.hideWallets = false; dev.planDelay = 1300; dev.statusDelay = [900, 3600]; dev.autoApprove = null;
+    dev.hideWallets = false; dev.planDelay = 1300; dev.statusDelay = [900, 3600]; dev.autoApprove = null; dev.accounts = "normal";
     s.out = app.DEFAULT_OUTS[0]; s.customAck = false; s.includeBurn = false; s.query = ""; document.getElementById("listSearch").value = "";
     s.preset = 2; s.range = { min: 0, max: 2 };
   }
@@ -308,6 +403,31 @@ export async function init(app, params) {
     dev.statusDelay = [300, 900];
     dev.autoApprove = outcome;
     app.approve();
+  }
+  async function cleanup(kind = "normal") {
+    await reset();
+    dev.accounts = kind;
+    if (app.state.account) app.openCleanup();
+    else { app.state.intent = "cleanup"; await app.connect(wallet); }
+    if (kind !== "slow") await waitFor(() => !app.state.rc.loading && !!(app.state.rc.accounts || app.state.rc.error));
+  }
+  async function rcReview({ burns = false, kind = "normal" } = {}) {
+    await cleanup(kind);
+    const rc = app.state.rc;
+    if (burns) {
+      await app.loadAccounts({ silent: true, prices: true });
+      rc.burnAck = true; rc.burnOpen = true; rc.built = null;
+      rc.burnSel = new Set(rc.accounts.filter((a) => a.burnable && a.usd != null).slice(0, 2).map((a) => a.address));
+      app.renderCleanup();
+    }
+    dev.planDelay = 200;
+    await app.buildReclaim();
+  }
+  async function rcFinished(outcome) {
+    await rcReview({ kind: outcome === "partial" ? "many" : "normal" });
+    dev.statusDelay = [300, 900];
+    dev.autoApprove = outcome;
+    app.approveReclaim();
   }
   const STATES = [
     ["flow", [
@@ -336,6 +456,21 @@ export async function init(app, params) {
       ["into $LILVADER, no fee", async () => { await connected("normal"); if (app.burnOut()) app.setOut(app.burnOut()); }],
       ["review into $LILVADER", () => review({ lilvader: true })],
       ["unverified output", async () => { await connected("normal"); app.setOut({ ...CATALOG[3] }); }],
+    ]],
+    ["the cleanup", [
+      ["cleanup list", () => cleanup("normal")],
+      ["cleanup: nothing to close", () => cleanup("none")],
+      ["cleanup: can't close any", () => cleanup("blocked")],
+      ["cleanup: big wallet", () => cleanup("many")],
+      ["cleanup: burn section open", async () => { await cleanup("normal"); const rc = app.state.rc; rc.burnOpen = true; rc.built = null; app.renderCleanup(); }],
+      ["cleanup loading", () => cleanup("slow")],
+      ["cleanup error", () => cleanup("error")],
+      ["cleanup building", async () => { await cleanup("normal"); dev.planDelay = 8000; app.buildReclaim(); }],
+      ["cleanup review", () => rcReview()],
+      ["review with burns", () => rcReview({ burns: true })],
+      ["cleanup success", () => rcFinished("success")],
+      ["cleanup partial", () => rcFinished("partial")],
+      ["empty wallet + rent", async () => { await connected("empty"); }],
     ]],
   ];
   function renderPop() {

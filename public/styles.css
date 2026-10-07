@@ -1091,6 +1091,108 @@ html:active-view-transition-type(back)::view-transition-new(picture) { animation
 .bar-top .bar-in, .bar-bot .bar-in { animation: fadein .6s .8s both; }
 html.revisit .bar-top .bar-in, html.revisit .bar-bot .bar-in { animation: none; }
 
+/* ================= token images (same-origin proxy) ================= */
+/* the letter badge stays visible until the proxied image has actually arrived, so a slow or missing image
+   never shows as an empty dark disc */
+.tok-ico img { opacity: 0; transition: opacity .25s var(--ease-out); }
+.tok-ico img.on { opacity: 1; }
+/* the badge's edge drawn over the picture, so a white or black logo doesn't melt into the page */
+.tok-ico::after { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(255 255 255 / .14); pointer-events: none; z-index: 1; }
+
+/* ================= the cleanup: rent back ================= */
+.hero-alt { margin-top: 14px; }
+.hero-alt .btn-text { color: #d6cfe7; padding-left: 0; text-align: left; text-shadow: 0 1px 8px rgb(7 10 26 / .95), 0 0 2px rgb(7 10 26 / .8); }
+.hero-alt .btn-text:hover { color: var(--flare); }
+.title-card > :nth-child(6) { animation-delay: 1.55s; }
+
+.liner-cleanup { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px 28px; margin-bottom: 48px; --c: rgb(110 231 168 / .45); }
+.liner-cleanup > div { flex: 1 1 420px; min-width: 0; }
+.liner-cleanup p:not(.overline) { color: var(--lav-2); font-size: 14px; max-width: 68ch; }
+.liner-cleanup .btn-ghost { flex: none; }
+
+.rent-card { animation: fadein .45s var(--ease-out); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; --c: rgb(222 178 95 / .55); --fbg: linear-gradient(180deg, rgb(222 178 95 / .09), rgb(45 32 49 / .32)); }
+.rent-card .overline { margin-bottom: 4px; color: var(--flare); }
+.rent-txt { min-width: 0; }
+.rent-line { font-size: 13px; color: var(--lav-2); }
+.rent-line b { color: var(--text); font-weight: 600; }
+.rent-card .btn-ghost { flex: none; }
+.res-rc:empty { display: none; }
+/* the rent offer under the pockets title: one line, sentence case like the facts above it */
+.pk-rentline { margin-top: 6px; }
+.rent-link { color: var(--flare); padding-left: 0; text-align: left; }
+.rent-link:hover { color: #fff3cf; }
+.rent-link .i { flex: none; }
+
+.rc-rows .row { content-visibility: auto; contain-intrinsic-size: auto 66px; }
+.rc-row .worth b { color: var(--flare); }
+/* the name keeps a readable width before anything else in the row gives way */
+.rc-row .sym { flex: 0 1 auto; min-width: min(8ch, 100%); }
+/* a burn row leads with the value being destroyed, and its sub-line may wrap so "could be sold instead" is never cut */
+.rc-row.burn .worth b { color: var(--text); }
+.rc-row.burn .worth b.pinkt { color: var(--pink); }
+.rc-row.burn .worth span { white-space: nowrap; }
+.rc-row.burn .who-sub { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
+.rc-row.burn:has(.cb-input:checked) { background: linear-gradient(90deg, rgb(232 158 164 / .2), rgb(232 158 164 / .06) 75%, transparent); }
+.rc-row.burn::before { background: var(--pink); box-shadow: 0 0 10px rgb(232 158 164 / .7); }
+.rc-row.burn .cb-input:checked + .cb { background: linear-gradient(180deg, #f7cdd1, var(--pink) 60%, #c47880); box-shadow: inset 0 1px 0 rgb(255 255 255 / .5), 0 0 0 1px #b06a72, 0 0 12px rgb(232 158 164 / .35); }
+.rc-row.burn:has(.cb-input:checked) .tno { color: var(--pink); }
+.btn-text:disabled { opacity: .45; cursor: not-allowed; }
+.btn-text:disabled:hover { color: var(--lav-2); }
+.rc-wsol { margin-bottom: 18px; }
+.rc-wsol .rows { border-top: 1px solid var(--hair-2); }
+.rc-more { margin: 14px auto 0; display: flex; }
+.rc-burn-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; margin: 14px 0 6px; }
+.rc-burn-head .hint { flex-basis: 100%; }
+.rc-pricing { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 4px 0 6px; }
+.ch-usd { margin-top: 2px; }
+.rc-burn { margin-top: 18px; background: rgb(232 158 164 / .04); box-shadow: inset 0 0 0 1px rgb(232 158 164 / .25); }
+.rc-burn summary { color: var(--text); }
+.hidden-list summary .rc-flame { margin-left: 0; color: var(--pink); }
+.hidden-list[open] summary .rc-flame { rotate: none; }
+.rc-warn { margin: 2px 0 10px; }
+.rc-warn > p:not(.warn-title) { color: var(--lav-2); margin-bottom: 10px; }
+.rc-burn-tools { display: flex; justify-content: flex-end; gap: 8px; }
+.rc-burn .rows { border-top: 1px solid var(--hair); }
+.rc-holding { margin-top: 14px; }
+.cut-main > .tracklist + .hidden-list { margin-top: 18px; }
+
+/* two icons overlapping by about a third, so both stay readable, and a count for the rest */
+.ico-stack { position: relative; width: 36px; height: 36px; }
+.ico-stack .tok-ico { position: absolute; width: 24px; height: 24px; font-size: 10px; box-shadow: 0 0 0 2px var(--night), 0 2px 6px rgb(0 0 0 / .35); }
+.ico-stack .tok-ico:nth-child(1) { left: 0; top: 2px; z-index: 2; }
+.ico-stack .tok-ico:nth-child(2) { left: 15px; top: 2px; z-index: 1; }
+.ico-more { position: absolute; left: 50%; translate: -50% 0; bottom: -1px; white-space: nowrap; z-index: 3; padding: 1px 4px; border-radius: 6px; background: var(--night); color: var(--gold); font: 700 9px/1.2 var(--f-ui); font-variant-numeric: tabular-nums; box-shadow: inset 0 0 0 1px rgb(222 178 95 / .45); }
+.rc-accts { list-style: none; margin: 6px 0 2px; padding: 0; display: grid; gap: 3px; max-height: 240px; overflow: auto; font-variant-numeric: tabular-nums; }
+.rc-accts li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; }
+.rc-a-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stamp.long { font-size: clamp(64px, 10vw, 150px); }
+
+@media (max-width: 900px) {
+  /* after the protection card, so it doesn't split the list from its own "dust into" choice */
+  .rent-card { order: 5; width: 100%; margin-top: 16px; }
+}
+/* the cleanup's explainer stays in view beside a long list, like the pockets aside */
+@media (min-height: 780px) and (min-width: 901px) { #rcAside { position: sticky; top: calc(var(--bar-top) + 24px); } }
+@media (max-width: 640px) {
+  .rent-card { padding: 12px 14px; }
+  .liner-cleanup .btn-ghost { width: 100%; }
+  /* the cleanup's two numbers sit side by side on phones, so the list starts on the first screen; the SOL figure
+     gets the wider column and shrinks with the screen rather than run past it */
+  .rc-hero:not(.compact) { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 16px; }
+  .rc-hero .ch-out { padding-top: 0; border-top: 0; padding-left: 16px; border-left: 1px dashed var(--hair); }
+  .rc-hero .ch-big { font-size: clamp(24px, 8.6vw, 34px); white-space: nowrap; }
+  .rc-hero .ch-sub { font-size: 12px; white-space: normal; }
+  .rc-tracklist .tl-col, .rc-wsol .tl-col { display: none; }
+  /* stays in the text column, clear of Dusty and the name sticker */
+  .hero-alt { margin-top: 6px; max-width: 54%; }
+  .tx .ico-stack { width: 32px; height: 32px; }
+  .tx .ico-stack .tok-ico { width: 22px; height: 22px; }
+  .ico-stack .tok-ico:nth-child(2) { left: 14px; }
+  .rc-accts li { grid-template-columns: minmax(0, 1fr) auto; }
+  .rc-accts .mono { display: none; }
+  .rc-burn-tools { justify-content: flex-start; }
+}
+
 /* ================= responsive ================= */
 @media (max-width: 1080px) {
   .pk-grid, .cut-grid { grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; }
@@ -1206,7 +1308,18 @@ html.revisit .bar-top .bar-in, html.revisit .bar-bot .bar-in { animation: none; 
   .row .flag { padding: 0 5px; }
   .seg { -webkit-mask: linear-gradient(90deg, #000 84%, transparent); mask: linear-gradient(90deg, #000 84%, transparent); }
 }
+@media (max-width: 420px) {
+  #ctaAlt.wide-only { display: none; }
+}
+/* below 360px the cleanup's numbers stack like the swap's cut */
+@media (max-width: 360px) {
+  .rc-hero:not(.compact) { grid-template-columns: 1fr; gap: 12px; }
+  .rc-hero .ch-out { padding-left: 0; border-left: 0; padding-top: 12px; border-top: 1px dashed var(--hair); }
+}
+.xs-show { display: none; }
 @media (max-width: 380px) {
+  .xs-show { display: inline; }
+  .xs-hide { display: none !important; }
   .sum-worth { display: none; }
   .btn-gold { padding: 0 14px; }
 }

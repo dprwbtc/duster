@@ -82,9 +82,22 @@ function outAmt(n, o) {
   return amt(n);
 }
 const int = (n) => (n >= 1 ? Math.round(n).toLocaleString("en-US") : amt(n));
-const plural = (n, w, p = w + "s") => `${n} ${n === 1 ? w : p}`;
+const plural = (n, w, p = w + "s") => `${typeof n === "number" ? n.toLocaleString("en-US") : n} ${n === 1 ? w : p}`;
 const pct = (bps) => +(bps / 100).toFixed(2) + "%";
 const RENT_SOL = 0.00203928; // rent held by a standard token account (Token-2022 accounts hold a bit more), returned when it's closed
+// SOL from lamports: five decimals below 0.01 SOL, so one account's rent reads 0.00204 (four would round it to
+// 0.0020 and the rows wouldn't add up to the total), four below 1 SOL, two above
+function solAmt(lamports) {
+  const n = (Number(lamports) || 0) / 1e9;
+  if (n === 0) return "0";
+  if (n < 0.00001) return "<0.00001";
+  const d = n < 0.01 ? 5 : 4;
+  return n.toLocaleString("en-US", { minimumFractionDigits: n < 1 ? d : 2, maximumFractionDigits: d });
+}
+// "≈ 0.0286 SOL" never breaks after the ≈
+const solApprox = (lamports) => `≈ ${solAmt(lamports)}`;
+// the same amount in dollars at the SOL price /api/config already returned (estimate only; no extra request)
+const solUsd = (lamports) => { const p = state.prices?.[SOL]; return p > 0 && lamports > 0 ? usd((lamports / 1e9) * p) : null; };
 
 /* ================= constants & state ================= */
 const SOL = "So11111111111111111111111111111111111111112";
@@ -103,6 +116,9 @@ const CHUNK = 8;           // tokens per /api/plan request, so progress is real 
 const TTL_MS = 120_000;
 const DEFAULT_SET = { slip: 1, loss: 10, close: true };
 const PRESETS = [1, 2, 5, 10, 25, "all", "custom"];
+const RC_MAX = 400;          // accounts per cleanup run, matching /api/reclaim's cap (about 16 transactions)
+const RC_TTL_MS = 5 * 60_000; // a cleanup review older than this is checked again before signing
+const RC_PAGE = 40;           // cleanup rows shown before "show more", so a 1,300-account wallet can reach what's below the list
 
 const state = {
   scene: "title", epoch: 0, busy: null,
@@ -114,7 +130,17 @@ const state = {
   set: { ...DEFAULT_SET, ...sanitizeSet(store.get("set", {})) },
   plan: null, planAt: 0, building: null, stale: false, staleWhy: null, notice: null,
   run: null, pendingAccounts: null, tempLoss: null,
+  rowsFor: null,   // the address the pockets list was last read for (the cleanup can be opened without it)
+  rc: rcFresh(),   // the cleanup: rent reclaim from token accounts
+  signing: null,   // "swap" | "reclaim" while a wallet prompt is being prepared or shown
+  intent: null,    // "cleanup" when the landing's "just reclaim rent" asked for a wallet first
+  cinemaN: 0,
 };
+function rcFresh() {
+  return { accounts: null, owner: null, loading: false, error: null, at: 0, seq: 0, priced: false, priceError: false, pricing: false, pricingError: null,
+    sel: new Set(), burnSel: new Set(), burnAck: false, burnOpen: false, plan: null, building: null, notice: null, resetSel: false, pendingSel: null, built: null, inputs: new Map(),
+    showN: RC_PAGE, from: null };
+}
 // Dev/QA helpers, only ever loaded on localhost (see boot). Whether dev mode was asked for is decided before
 // any wallet can register, so a real wallet that registers while dev.js is still loading can't slip past its filter.
 const params = new URLSearchParams(location.search);
@@ -186,7 +212,7 @@ async function api(path, body, { signal } = {}) {
 }
 
 /* ================= scene control ================= */
-const SCENES = { title: ["sc. 00", "title", 0], pockets: ["sc. 01", "the pockets", 1], cut: ["sc. 02", "the cut", 2], wallet: ["sc. 03", "your move", 3], drop: ["sc. 04", "the drop", 4] };
+const SCENES = { title: ["sc. 00", "title", 0], pockets: ["sc. 01", "the pockets", 1], cleanup: ["sc. 01", "the cleanup", 1], sweep: ["sc. 02", "the sweep", 2], cut: ["sc. 02", "the cut", 2], wallet: ["sc. 03", "your move", 3], drop: ["sc. 04", "the drop", 4] };
 let currentVT = null;
 function vt(update, types = []) {
   if (!document.startViewTransition || reduced() || document.hidden) { update(); return Promise.resolve(); }
@@ -206,13 +232,16 @@ function go(scene, { back = false, instant = false } = {}) {
     window.scrollTo({ top: 0, behavior: "instant" });
     // the list may have changed while another scene was showing (background refresh, output change)
     if (scene === "pockets" && !state.loading && !state.loadError && state.rows.length) { syncRows(); renderPocketsMeta(); renderAside(); requestAnimationFrame(movePresetThumb); }
+    if (scene === "pockets") renderRentCard();
+    if (scene === "cleanup") renderCleanup();
     renderSlate(); renderBar();
   };
   if (instant || state.scene === scene) { apply(); return Promise.resolve(); }
   return vt(apply, [back ? "back" : "forward"]);
 }
 function renderSlate() {
-  const key = root.classList.contains("cinema-on") ? "wallet" : state.scene;
+  // the cleanup's review is its own beat (sc. 02), like the cut is for swaps
+  const key = root.classList.contains("cinema-on") ? "wallet" : state.scene === "cleanup" && (state.rc.plan || state.rc.building) ? "sweep" : state.scene;
   const [num, name, idx] = SCENES[key];
   $("#slateNum").textContent = num;
   $("#slateName").textContent = name;
@@ -500,7 +529,7 @@ function abandonConnect() {
   connectSeq++; state.connecting = false; state.connectingSilent = false; clearTimeout(connectTimer);
 }
 dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
-dlg.addEventListener("close", () => { if (dialogConnecting()) abandonConnect(); });
+dlg.addEventListener("close", () => { if (dialogConnecting()) abandonConnect(); if (!state.account) state.intent = null; });
 $$("[data-close]", dlg).forEach((b) => b.addEventListener("click", () => dlg.close()));
 
 function deepLinks() {
@@ -549,7 +578,7 @@ function openWallets({ note = null } = {}) {
           h("span", { class: "w-tag" }, icon("spark", "i i-sm"), "detected"));
       })),
       note,
-      h("p", { class: "wd-fine" }, "Works with Phantom, Solflare, Backpack and other Wallet Standard wallets. Connecting is read-only: Duster sees your address and balances. Nothing is signed until you approve a swap."));
+      h("p", { class: "wd-fine" }, "Works with Phantom, Solflare, Backpack and other Wallet Standard wallets. Connecting is read-only: Duster sees your address and balances. Nothing is signed until you approve it in your wallet."));
   }
   if (!dlg.open) dlg.showModal();
 }
@@ -593,6 +622,9 @@ async function connect(w, { silent = false } = {}) {
   setAccount(w, acc);
   store.set("wallet", w.name);
   if (dlg.open) dlg.close();
+  // "just reclaim rent" on the landing goes straight to the cleanup; the pockets load when visited
+  const intent = state.intent; state.intent = null;
+  if (intent === "cleanup") { state.rc.resetSel = true; state.rc.from = "title"; await go("cleanup"); loadAccounts(); return; }
   await go("pockets");
   loadHoldings();
 }
@@ -616,11 +648,12 @@ function onWalletChange(w, { accounts } = {}) {
   setAccount(w, accounts[0]);
   toast({ title: "switched account", body: "Reloading balances for the account your wallet switched to." });
   state.plan = null; state.run = null; state.stale = false; stopRing();
+  state.rc = rcFresh(); state.rowsFor = null;
   go("pockets").then(() => loadHoldings());
 }
 // every path that ends a busy phase goes through here, so a deferred account switch is never lost
 function setIdle() {
-  state.busy = null;
+  state.busy = null; state.signing = null;
   if (state.pendingAccounts) { const { w, accounts } = state.pendingAccounts; setTimeout(() => { if (!state.busy && state.pendingAccounts) onWalletChange(w, { accounts }); }, 0); }
 }
 function liveAccountOk(addr) {
@@ -637,12 +670,21 @@ function disconnect({ quiet = false } = {}) {
   store.set("wallet", null);
   state.wallet = state.account = null; state.rows = []; state.selected.clear(); state.plan = null; state.run = null; state.building = null; state.busy = null;
   state.pendingAccounts = null; state.includeBurn = false; state.stale = false;
+  state.rc = rcFresh(); state.rowsFor = null; state.intent = null;
   for (const el of rowEls.values()) el.remove(); rowEls.clear();
   root.classList.add("revisit");
   go("title", { back: true });
   if (!quiet) toast({ title: "disconnected. come back dusty", body: "Duster no longer sees this wallet." });
 }
 $("#heroConnect").addEventListener("click", () => (state.account ? go("pockets") : openWallets()));
+// "just reclaim rent": works without any sellable dust; asks for a wallet first when none is connected
+function reclaimEntry() {
+  if (state.busy) return;
+  if (state.account) return openCleanup();
+  state.intent = "cleanup";
+  openWallets();
+}
+$$("[data-reclaim]").forEach((b) => b.addEventListener("click", reclaimEntry));
 $("#topConnect").addEventListener("click", () => openWallets());
 $("#wpDisconnect").addEventListener("click", () => disconnect());
 $("#wpSwitch").addEventListener("click", () => { closePop("walletPop"); openWallets(); });
@@ -708,6 +750,8 @@ function setCta(label, { action = null, disabled = false, busy = false, alt = nu
   cta.setAttribute("aria-busy", String(busy));
   ctaAction = action;
   ctaAlt.hidden = !alt;
+  // a "wide" alt is a shortcut the page itself also offers, so very narrow bars drop it rather than crowd the count
+  ctaAlt.classList.toggle("wide-only", !!alt?.wide);
   if (alt) { ctaAlt.textContent = alt.label; ctaAltAction = alt.run; }
 }
 cta.addEventListener("click", () => ctaAction && ctaAction());
@@ -741,7 +785,7 @@ function renderBar() {
   }
   if (root.classList.contains("cinema-on")) {
     caption("check the wallet. i’ll wait");
-    $("#sumCount").textContent = plural(state.plan?.txs.length || 0, "transaction");
+    $("#sumCount").textContent = plural(state.cinemaN || 0, "transaction");
     $("#sumWorth").textContent = "· 1 wallet prompt";
     feeEl.replaceChildren(h("span", {}, "nothing sent until you approve"));
     return setCta(innerWidth > 640 && (state.wallet?.name || "").length < 16 ? `waiting for ${state.wallet.name}…` : "waiting for wallet…", { disabled: true, busy: true });
@@ -767,7 +811,11 @@ function renderBar() {
       return left > 0 ? setCta(`try again in ${left}s`, { disabled: true }) : setCta("try again", { action: () => loadHoldings() });
     }
     if (!state.rows.length || !state.rows.some((r) => r.usd != null && !isBurnRow(r))) {
-      $("#sumCount").textContent = "nothing to dust"; caption("spotless. nothing to dust");
+      $("#sumCount").textContent = "nothing to dust";
+      // nothing to sell can still mean rent locked in empty accounts: offer that instead of a dead end
+      const e = rcEmptiesMine();
+      if (e.length) { caption("spotless. but there’s rent in the lining"); return setCta(`reclaim ${solApprox(e.reduce((a, x) => a + x.rentLamports, 0))} SOL`, { action: () => openCleanup() }); }
+      caption("spotless. nothing to dust");
       return setCta("switch wallet", { action: () => openWallets() });
     }
     if (!n) { caption("pick what’s collectin’ dust"); return setCta("pick some dust", { disabled: true }); }
@@ -776,6 +824,8 @@ function renderBar() {
     caption(isBurnOut() ? "straight to the source. no fee" : unverifiedOut() ? "double-check that address" : n >= 8 ? "found the dust in every corner" : "say less");
     return setCta(`preview ${plural(n, "swap")}`, { action: () => startPreview() });
   }
+
+  if (s === "cleanup") return renderCleanupBar(feeEl);
 
   if (s === "cut") {
     const p = state.plan, b = state.building;
@@ -812,13 +862,14 @@ function renderBar() {
 
   if (s === "drop") {
     const r = state.run; if (!r) return setCta("dust again", { action: dustAgain });
+    if (r.kind === "reclaim") return renderReclaimDropBar(r, feeEl);
     const c = r.items.filter((i) => i.status === "confirmed").length, n = r.items.length;
     $("#sumCount").textContent = `${c} of ${n} confirmed`;
     feeEl.replaceChildren(h("span", {}, r.done ? (r.sim ? "simulated run · nothing was sent" : "your token list is refreshing") : "keep this tab open until it’s done"));
     if (r.retrying) { caption("checkin’ what landed…"); return setCta("checking balances…", { disabled: true, busy: true }); }
     if (!r.done) { caption("sent. waitin’ on the network…"); return setCta(`sending ${n}…`, { disabled: true, busy: true }); }
     const failed = r.items.filter((i) => i.status !== "confirmed");
-    if (!failed.length) { caption("clean sweep. not a speck left"); return setCta("dust again", { action: dustAgain }); }
+    if (!failed.length) { caption(rcEmptiesMine().length ? "clean sweep. rent’s still in the lining" : "clean sweep. not a speck left"); return setCta("dust again", { action: dustAgain }); }
     if (!c) { caption(failed.every((f) => f.status === "expired") ? "it expired before landing" : "nothing landed this time"); return setCta("preview again", { action: () => retryMints(failed) }); }
     caption("mostly clean");
     return setCta(failed.length === 1 ? "preview that one again" : `preview the ${failed.length} again`, { action: () => retryMints(failed), alt: { label: "done", run: dustAgain } });
@@ -842,7 +893,7 @@ function startCooldown(sec) {
   state.cooldownUntil = Math.max(state.cooldownUntil, Date.now() + sec * 1000);
   clearInterval(cdT);
   const tick = () => {
-    if ((state.scene === "pockets" && state.loadError) || (state.scene === "cut" && !state.busy)) renderBar();
+    if ((state.scene === "pockets" && state.loadError) || ((state.scene === "cut" || state.scene === "cleanup") && !state.busy)) renderBar();
     syncCooldownButtons();
     if (Date.now() > state.cooldownUntil) clearInterval(cdT);
   };
@@ -856,6 +907,9 @@ async function loadHoldings({ silent = false } = {}) {
     state.loading = true; state.loadError = null; state.rows = []; state.selected.clear(); state.plan = null;
     renderPockets();
     setPose(sceneMascot("pockets"), 12, { mode: "wiggle" });
+    // the empty-pockets line and card read every account, empty ones too. RPC only (no prices, so no Jupiter
+    // quota), and started alongside the holdings read so the line is usually ready before the list is
+    loadAccounts({ silent: true });
   }
   let rows;
   try {
@@ -872,6 +926,7 @@ async function loadHoldings({ silent = false } = {}) {
   }
   if ((!silent && ep !== state.epoch) || state.account?.address !== addr) return;
   state.loading = false;
+  state.rowsFor = addr;
   state.rows = rows.filter((r) => r && typeof r.mint === "string").map((r) => ({
     mint: r.mint, amount: Number(r.amount) || 0, frozen: !!r.frozen,
     usd: typeof r.usd === "number" && Number.isFinite(r.usd) ? r.usd : null,
@@ -879,6 +934,7 @@ async function loadHoldings({ silent = false } = {}) {
     name: typeof r.name === "string" ? r.name.slice(0, 64) : null,
     icon: typeof r.icon === "string" ? r.icon : null, verified: !!r.verified,
   })).sort((a, b) => (b.usd ?? -1) - (a.usd ?? -1));
+  rcBackfillNames();
   if (silent) {
     // keep the selection, drop rows that are gone, no flashing
     state.selected = new Set([...state.selected].filter((m) => rowBy(m)));
@@ -952,19 +1008,33 @@ $("#rangeApply").addEventListener("click", () => {
 });
 
 /* ---- token icons and rows (keyed, patched in place so focus and scroll survive) ---- */
-// Remote icons only for verified tokens. An unverified token's icon host is picked by whoever minted it (often a
-// per-wallet airdrop), so loading it would tell them this wallet is on Duster right now. Those get a letter
-// badge instead. Icons that failed once are not requested again.
-const badIcons = new Set();
+// Token images only ever come from /api/img on this origin. The image a token's metadata points at is hosted
+// wherever its creator chose (often a per-wallet airdrop), so loading it from here would tell them this visitor
+// is on Duster right now; the server fetches it instead (SSRF-guarded), checks it's a real raster image and
+// re-encodes it. The letter badge is the placeholder underneath and stays if there's no image. Names that look
+// like lures never get a picture either: a scam's logo is part of the lure. The URL is /i/<mint> (rewritten to
+// /api/img), so a list full of pictures never eats into the firewall's /api request budget. A failed image is
+// tried once more after its error response has expired from the browser cache (cold IPFS content and busy gateways
+// often answer on a later try); after that, the mint isn't asked for again for a few minutes.
+const B58RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const badImg = new Map(); // mint -> when it failed for good
+const IMG_RETRY_MS = 65_000; // just past the 60s browser max-age of a "try later" answer
 function tokIcon(t, extra = "") {
   const label = (t.symbol || "?").replace(/[^\p{L}\p{N}]/gu, "").slice(0, 1).toUpperCase() || "?";
-  const isBurn = !!(t.burn || (burnId() && (t.mint || t.id) === burnId()));
+  const mint = t.mint || t.id;
+  const isBurn = !!(t.burn || (burnId() && mint === burnId()));
   const el = h("span", { class: "tok-ico" + (isBurn ? " burn" : "") + (extra ? " " + extra : ""), "aria-hidden": "true" }, label);
-  el.style.setProperty("--h", String(hash(t.mint || t.id || "x") % 360));
-  const src = t.icon;
-  if ((t.verified || isBurn) && typeof src === "string" && /^https:\/\/[^\s"'<>]+$/i.test(src) && src.length < 2048 && !badIcons.has(src)) {
-    const img = h("img", { src, alt: "", referrerpolicy: "no-referrer", loading: "lazy", decoding: "async" });
-    img.addEventListener("error", () => { badIcons.add(src); img.remove(); });
+  el.style.setProperty("--h", String(hash(mint || "x") % 360));
+  if (typeof mint === "string" && B58RE.test(mint) && !(Date.now() - (badImg.get(mint) ?? -Infinity) < 180_000) && (isBurn || !looksSpam(t))) {
+    const src = "/i/" + encodeURIComponent(mint);
+    const img = h("img", { src, alt: "", loading: "lazy", decoding: "async", width: "36", height: "36" });
+    let tries = 0;
+    img.addEventListener("load", () => img.classList.add("on"));
+    // the letter stays visible underneath while the image is missing (it only shows once it has loaded)
+    img.addEventListener("error", () => {
+      if (tries++ === 0) { setTimeout(() => { if (img.isConnected) { img.removeAttribute("src"); img.src = src; } }, IMG_RETRY_MS); return; }
+      badImg.set(mint, Date.now()); img.remove();
+    });
     el.append(img);
   }
   return el;
@@ -1082,7 +1152,10 @@ function renderPockets({ stagger = false } = {}) {
     $("#pkFacts").textContent = state.rows.length
       ? `Nothing here has a reliable price${unpriced ? ` (${plural(unpriced, "token")} without one, listed below)` : ""}, so there’s nothing Duster can sell safely.`
       : "No tokens besides SOL, so there’s nothing to dust.";
-    fill(pkState, stateStill(13, "not a speck in sight", "Dusty checked every pocket. Come back when the airdrops pile up."),
+    const rent = rcEmptiesMine();
+    if (rent.length) $("#pkFacts").textContent += ` ${plural(rent.length, "empty account")} still ${rent.length === 1 ? "holds" : "hold"} about ${solAmt(rent.reduce((a, x) => a + x.rentLamports, 0))} SOL of rent you can get back.`;
+    // with rent on offer, the bar's one action is "reclaim"; the card doesn't repeat it
+    fill(pkState, rent.length ? stateStill(13, "no dust, just rent", "No dust to sell, but there’s rent in the lining. Reclaim it from the bar below.") : stateStill(13, "not a speck in sight", "Dusty checked every pocket. Come back when the airdrops pile up."),
       h("div", { class: "state-actions" },
         h("button", { class: "btn-ghost sm", type: "button", onclick: () => openWallets() }, icon("wallet", "i i-sm"), "switch wallet"),
         h("button", { class: "btn-text sm", type: "button", onclick: () => loadHoldings() }, icon("refresh", "i i-sm"), "check again")));
@@ -1091,6 +1164,7 @@ function renderPockets({ stagger = false } = {}) {
     syncRows({ stagger });
   }
   $(".pk-aside").hidden = !state.loading && (!!state.loadError || empty);
+  renderRentCard();
   // one mascot per viewport: the set piece replaces the cameo in the empty and error states
   sceneMascot("pockets").hidden = !state.loading && (!!state.loadError || empty);
   renderPocketsMeta(); renderAside(); renderBar();
@@ -1622,7 +1696,7 @@ function drawCut() {
     svgArrow(),
     h("div", { class: "ch-block ch-out" }, h("p", { class: "overline" }, "you get", state.stale && n && h("span", { class: "old-tag" }, "old quote")), h("p", { class: "ch-big" }, `≈ ${outAmt(t.receive, o)}`, h("small", {}, symOf(o))),
       h("p", { class: "ch-sub" }, t.minReceive != null ? `at least ${outAmt(t.minReceive, o)} ${symOf(o)}${p.feeApplied ? ", after the fee" : ""}` : p.feeApplied ? "after the fee" : "")));
-  $("#cutListLabel").replaceChildren(h("span", {}, `tracklist · ${plural(n, "transaction")}`), n > 0 && h("span", { class: "tl-col" }, "vs. market"));
+  fill($("#cutListLabel"), h("span", {}, `tracklist · ${plural(n, "transaction")}`), n > 0 && h("span", { class: "tl-col" }, "vs. market"));
   const animate = !p._shown && !reduced();
   list.replaceChildren(...t.items.map((x, i) => {
     const li = txRow(x, i, { cls: state.stale ? "stale" : "", out: o });
@@ -1734,6 +1808,7 @@ function blockhashOf(b64) {
 }
 function accountMoved() {
   state.plan = null; state.stale = false; stopRing();
+  state.rc = rcFresh();
   const live = state.wallet?.accounts;
   if (!state.pendingAccounts && Array.isArray(live) && live.length && !live.some((a) => a.address === state.account?.address)) state.pendingAccounts = { w: state.wallet, accounts: [...live] };
   if (state.pendingAccounts) return setIdle(); // applies the switch and reloads balances
@@ -1750,7 +1825,7 @@ async function approve() {
   if (!feature) { toast({ title: "this wallet can’t sign here", body: "Pick a wallet that supports Solana transaction signing.", tone: "bad" }); return; }
   closeAllPops(); clearToasts();
   const ep = state.epoch;
-  state.busy = "signing"; state.notice = null;
+  state.busy = "signing"; state.signing = "swap"; state.notice = null;
   $("#main").inert = true; // nothing on the page changes between this click and the wallet's answer
   stopRing(); renderCut(); renderBar();
   const unlock = () => { $("#main").inert = false; };
@@ -1774,7 +1849,7 @@ async function approve() {
     if (state.pendingAccounts || p.owner !== state.account?.address || !liveAccountOk(p.owner)) return accountMoved();
     return startPreview(p.mints, { notice: "Something changed while the transactions were being prepared, so the preview was rebuilt. Check it again, then approve." });
   }
-  showCinema();
+  showCinema(swapCinema());
   let signed;
   try {
     const res = await feature.signTransaction(...fresh.txs.map((tx) => ({ account: acct, transaction: b64ToBytes(tx), chain: "solana:mainnet" })));
@@ -1802,15 +1877,21 @@ async function approve() {
   runSend(signed, fresh.lastValidBlockHeight, signed.map((s, i) => !!want[i] && blockhashOf(s) === want[i]));
 }
 let hintT;
-function showCinema() {
+// what the cinema says while the wallet is open, for a swap plan
+function swapCinema() {
   const p = state.plan, n = p.txs.length, o = p.out, t = planTotals(p);
+  return { n, facts: `${state.wallet?.name || "Your wallet"} is asking you to approve ${plural(n, "transaction")} in one prompt. Check the balance changes it shows. Nothing is sent until you approve.`,
+    items: [
+      unverifiedOut(o) && h("li", { class: "ask-warn" }, icon("warn", "i warn"), h("span", {}, h("b", {}, "Unverified token coming in. "), "Its address: ", h("span", { class: "mono mint-inline" }, o.id))),
+      h("li", {}, icon("spark"), h("span", {}, "You’ll see ", h("b", {}, `${plural(n, "token")} leaving`), ". Coming in: ", receiveLine(p, t, n), ".")),
+      p.feeApplied && h("li", {}, icon("flame", "i pink"), h("span", {}, `${burnSym()} may show as 0. It’s bought and burned inside each transaction.`)),
+      h("li", {}, icon("spark"), h("span", {}, "Duster never holds your funds or keys. Your wallet signs."))] };
+}
+function showCinema({ n, facts, items }) {
   closeAllPops();
-  $("#cinemaFacts").textContent = `${state.wallet?.name || "Your wallet"} is asking you to approve ${plural(n, "transaction")} in one prompt. Check the balance changes it shows. Nothing is sent until you approve.`;
-  fill($("#cinemaList"),
-    unverifiedOut(o) && h("li", { class: "ask-warn" }, icon("warn", "i warn"), h("span", {}, h("b", {}, "Unverified token coming in. "), "Its address: ", h("span", { class: "mono mint-inline" }, o.id))),
-    h("li", {}, icon("spark"), h("span", {}, "You’ll see ", h("b", {}, `${plural(n, "token")} leaving`), ". Coming in: ", receiveLine(p, t, n), ".")),
-    p.feeApplied && h("li", {}, icon("flame", "i pink"), h("span", {}, `${burnSym()} may show as 0. It’s bought and burned inside each transaction.`)),
-    h("li", {}, icon("spark"), h("span", {}, "Duster never holds your funds or keys. Your wallet signs.")));
+  state.cinemaN = n;
+  $("#cinemaFacts").textContent = facts;
+  fill($("#cinemaList"), items);
   $("#cinemaStuck").hidden = true;
   clearTimeout(hintT); hintT = setTimeout(() => { $("#cinemaStuck").hidden = false; }, 15000);
   const c = $("#cinema"); c.classList.remove("out"); c.hidden = false;
@@ -1833,8 +1914,16 @@ function hideCinema(instant = false) {
 // bumping the epoch means a signature that arrives later is dropped and never broadcast.
 function stopWaiting() {
   if (state.busy !== "signing" || !root.classList.contains("cinema-on")) return;
+  const kind = state.signing;
   state.epoch++;
   hideCinema(); setIdle();
+  if (kind === "reclaim") {
+    renderCleanup(); renderBar();
+    cta.focus({ preventScroll: true });
+    setPose(sceneMascot("cleanup"), 1);
+    toast({ title: "stopped waiting for the wallet", body: "Nothing was sent. If your wallet still shows the request, reject it there. Approve again whenever you’re ready." });
+    return;
+  }
   state.stale = true; state.staleWhy = "time";
   renderCut(); renderBar();
   cta.focus({ preventScroll: true });
@@ -1845,22 +1934,43 @@ $("#cinemaBack").addEventListener("click", stopWaiting);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && root.classList.contains("cinema-on")) { e.preventDefault(); stopWaiting(); } });
 
 /* ================= SC. 04 · send + confirm ================= */
-function humanErr(err) {
+function humanErr(err, kind = "swap") {
   const s = JSON.stringify(err) || "";
   if (/InsufficientFundsForFee|InsufficientFundsForRent/.test(s)) return "Not enough SOL for network fees.";
   const m = s.match(/"Custom":(\d+)/);
+  if (kind === "reclaim") {
+    if (m && +m[1] === 11) return "An account received tokens after the review, so it couldn’t be closed.";
+    if (m && +m[1] === 17) return "An account was frozen by its token’s issuer.";
+    if (/BlockhashNotFound/.test(s)) return "It expired before it landed.";
+    return "It failed on-chain.";
+  }
   if (m && [6001, 6017, 6024].includes(+m[1])) return "The price moved past your slippage limit.";
   if (m && +m[1] === 1) return "Not enough balance for this swap.";
   if (/BlockhashNotFound/.test(s)) return "It expired before it landed.";
   return "It failed on-chain.";
 }
 const CHECKING = "No clear answer from the network yet, so Duster is checking by signature…";
+// What a transaction that didn't land means, per flow. Everything else about sending and confirming is shared.
+const SWAP_COPY = {
+  kind: "swap",
+  notSent: (err) => `Didn’t send: ${err}. Nothing happened, and the token is still in your wallet.`,
+  failed: "Nothing was swapped or burned; only the network fee was paid. The token is still in your wallet.",
+  expired: "Expired: it never landed, so nothing happened. The token is still in your wallet.",
+  late: "Didn’t confirm in time, so it most likely expired without doing anything. Check your wallet history, then preview again. The token should still be in your wallet.",
+};
+const RC_COPY = {
+  kind: "reclaim",
+  notSent: (err) => `Didn’t send: ${err}. Nothing happened, and these accounts are still open.`,
+  failed: "Nothing in it was closed or burned; only the network fee was paid. These accounts are still open.",
+  expired: "Expired: it never landed, so nothing happened. These accounts are still open.",
+  late: "Didn’t confirm in time, so it most likely expired without doing anything. Check your wallet history, then try the rest again.",
+};
 async function runSend(signed, lastValid, keptHash = []) {
   const ep = ++state.epoch;
   const p = state.plan, t = planTotals(p);
   const lv = Number.isFinite(lastValid) ? lastValid : null;
   state.busy = "sending";
-  state.run = { items: t.items.map((x, i) => ({ ...x, i, status: "sending", sig: sigOf(signed[i]), note: null, lastValid: keptHash[i] ? lv : null, past: 0 })), done: false, out: p.out, feeApplied: p.feeApplied, burnMint: p.burnMint, close: p.set.close, sim: !!dev?.simulated };
+  state.run = { kind: "swap", items: t.items.map((x, i) => ({ ...x, i, status: "sending", sig: sigOf(signed[i]), note: null, lastValid: keptHash[i] ? lv : null, past: 0 })), done: false, out: p.out, feeApplied: p.feeApplied, burnMint: p.burnMint, close: p.set.close, sim: !!dev?.simulated };
   await go("drop");
   if (ep !== state.epoch) return;
   $("#stampWrap").hidden = true; $("#result").hidden = true; $("#drop-title").classList.remove("as-stamp");
@@ -1870,9 +1980,22 @@ async function runSend(signed, lastValid, keptHash = []) {
   setPose(sceneMascot("drop"), 6, { mode: "wiggle" });
   renderDrop(); renderBar();
   const items = state.run.items;
+  if (!(await sendAndTrack(items, signed, ep, SWAP_COPY))) return;
+  state.run.done = true; setIdle();
+  state.selected.clear();
+  renderDrop(); renderResult(); renderBar();
+  const c = items.filter((i) => i.status === "confirmed").length;
+  srSay(`${c} of ${items.length} confirmed.`);
+  // confirmed tokens leave the list in the background, without flashing it; the accounts read after it so the
+  // "reclaim rent" offer on the result reflects the accounts this run just closed
+  loadHoldings({ silent: true }).then(() => loadAccounts({ silent: true }));
+}
+// Relays signed transactions and follows each one by signature until it confirms, fails, or can no longer land.
+// Returns false if the user moved on meanwhile (the epoch changed), in which case nothing more is rendered.
+async function sendAndTrack(items, signed, ep, copy) {
   try {
     const sigs = await api("/api/send", { txs: signed });
-    if (ep !== state.epoch) return;
+    if (ep !== state.epoch) return false;
     if (!Array.isArray(sigs) || sigs.length !== items.length) throw new Error("unexpected response");
     items.forEach((it, i) => {
       const s = sigs[i];
@@ -1881,10 +2004,10 @@ async function runSend(signed, lastValid, keptHash = []) {
       // only a preflight rejection is definitive; anything else may still land, so keep watching the signature
       const definitive = !s?.uncertain && /simulation failed|expired/.test(err);
       if (it.sig && !definitive) { it.status = "confirming"; it.note = CHECKING; }
-      else { it.status = "never"; it.note = `Didn’t send: ${err}. Nothing happened, and the token is still in your wallet.`; }
+      else { it.status = "never"; it.note = copy.notSent(err); }
     });
   } catch (e) {
-    if (ep !== state.epoch) return;
+    if (ep !== state.epoch) return false;
     // The relay answer failed or made no sense, so we can't be sure what reached the network. Track by signature.
     items.forEach((it) => { if (it.sig) { it.status = "confirming"; it.note = CHECKING; } else { it.status = "never"; it.note = `Didn’t send: ${e.message} Nothing happened.`; } });
   }
@@ -1894,14 +2017,14 @@ async function runSend(signed, lastValid, keptHash = []) {
   const started = Date.now();
   while (pending().length) {
     await sleep(delay);
-    if (ep !== state.epoch) return;
+    if (ep !== state.epoch) return false;
     const pend = pending();
     // the block height is only needed to settle expiry: ask for it every third poll, once a minute has gone
     // by, or right after it first looked expired (expiry needs two looks in a row)
     const withH = polls++ % 3 === 2 || Date.now() - started > 50_000 || pend.some((it) => it.past);
     try {
       const res = await api(`/api/status?${withH ? "h=1&" : ""}sigs=${pend.map((it) => it.sig).join(",")}`);
-      if (ep !== state.epoch) return;
+      if (ep !== state.epoch) return false;
       const statuses = Array.isArray(res) ? res : res?.statuses || [];
       const bh = Array.isArray(res) ? null : res?.blockHeight;
       fails = 0; delay = 2000;
@@ -1909,7 +2032,7 @@ async function runSend(signed, lastValid, keptHash = []) {
         const s = statuses[k];
         if (!s) return;
         it.landed = true; it.past = 0;
-        if (s.err) { it.status = "failed"; it.note = `${humanErr(s.err)} Nothing was swapped or burned; only the network fee was paid. The token is still in your wallet.`; }
+        if (s.err) { it.status = "failed"; it.note = `${humanErr(s.err, copy.kind)} ${copy.failed}`; }
         else if (s.status === "confirmed" || s.status === "finalized") { it.status = "confirmed"; it.note = null; }
         else it.processed = true;
       });
@@ -1917,21 +2040,15 @@ async function runSend(signed, lastValid, keptHash = []) {
       // because the RPC nodes behind one endpoint can disagree for a moment.
       if (Number.isFinite(bh)) for (const it of pending()) {
         if (it.landed || it.lastValid == null) continue;
-        if (bh > it.lastValid) { if (++it.past >= 2) { it.status = "expired"; it.note = "Expired: it never landed, so nothing happened. The token is still in your wallet."; } }
+        if (bh > it.lastValid) { if (++it.past >= 2) { it.status = "expired"; it.note = copy.expired; } }
         else it.past = 0;
       }
     } catch { fails++; delay = Math.min(12000, 2000 * 2 ** fails); } // back off and keep polling; never give up on the first error
     if (Date.now() - started > 150_000)
-      for (const it of pending()) { it.status = "expired"; it.note = it.landed ? "Still not confirmed. Check your wallet history before trying again." : `Didn’t confirm in time, so it most likely expired without doing anything. Check your wallet history, then preview again. The token should still be in your wallet.`; }
+      for (const it of pending()) { it.status = "expired"; it.note = it.landed ? "Still not confirmed. Check your wallet history before trying again." : copy.late; }
     renderDrop(); renderBar();
   }
-  if (ep !== state.epoch) return;
-  state.run.done = true; setIdle();
-  state.selected.clear();
-  renderDrop(); renderResult(); renderBar();
-  const c = items.filter((i) => i.status === "confirmed").length;
-  srSay(`${c} of ${items.length} confirmed.`);
-  loadHoldings({ silent: true }); // confirmed tokens leave the list in the background, without flashing it
+  return ep === state.epoch;
 }
 function renderSimNote() {
   const el = $("#simNote");
@@ -1970,6 +2087,7 @@ function renderDrop() {
   const count = (s) => items.filter((i) => i.status === s).length;
   const c = count("confirmed"), f = count("failed"), e = count("expired"), nv = count("never");
   fill($("#chainCount"), `${c} of ${n} confirmed`, (f || e || nv) ? h("span", {}, [f && `${f} failed`, e && `${e} expired`, nv && `${nv} not sent`].filter(Boolean).join(" · ")) : "");
+  if (r.kind === "reclaim") return renderReclaimDrop(r);
   $("#runList").replaceChildren(...items.map((t, i) => {
     const sol = t.sig && !r.sim && h("a", { class: "sol-link", href: "https://solscan.io/tx/" + encodeURIComponent(t.sig), target: "_blank", rel: "noreferrer" }, "view on Solscan", icon("ext", "i"));
     const right = h("div", { class: "tx-right" },
@@ -1986,6 +2104,7 @@ function renderDrop() {
   }));
 }
 function renderResult() {
+  if (state.run?.kind === "reclaim") return renderReclaimResult();
   const r = state.run, o = r.out, items = r.items, n = items.length;
   const ok = items.filter((i) => i.status === "confirmed"), bad = items.filter((i) => i.status !== "confirmed");
   const recv = ok.reduce((a, t) => a + t.receive, 0), burned = ok.reduce((a, t) => a + (t.fee?.burned || 0), 0);
@@ -1996,6 +2115,7 @@ function renderResult() {
   if (!bad.length) {
     $("#dropFacts").textContent = `Every swap landed. About ${outAmt(recv, o)} ${symOf(o)} received (the quoted amount)${rent ? `, about ${rent.toFixed(4)} SOL of rent back` : ""}${burned ? `, ${int(burned)} ${burnSym()} burned` : ""}.`;
     $("#stampWrap").hidden = false; title.classList.add("as-stamp"); title.textContent = "dusted: all clean";
+    $("#stampText").textContent = "dusted"; $("#stamp").classList.remove("long");
     const st = $("#stamp"); st.classList.remove("slam"); void st.offsetWidth; if (!reduced()) st.classList.add("slam");
     setPose(m, 5, { mode: "jump" });
     feathers();
@@ -2019,10 +2139,11 @@ function renderResult() {
       h("div", { class: "stat received" }, h("p", { class: "overline" }, "received · expected"), h("p", { class: "stat-v" }, `≈ ${outAmt(recv, o)}`, h("small", {}, symOf(o))), h("p", { class: "stat-s" }, `quoted, from ${plural(ok.length, "token")}${state.plan?.outPrice ? ` · ≈ ${usd(recv * state.plan.outPrice)}` : ""}. Your wallet shows the exact amount.`)),
       h("div", { class: "stat" }, h("p", { class: "overline" }, "rent back"), h("p", { class: "stat-v" }, rent ? `≈ ${rent.toFixed(4)}` : "0", h("small", {}, "SOL")), h("p", { class: "stat-s" }, rent ? `estimate: about 0.002 SOL for each of ${plural(closed, "closed account")}` : "accounts kept open")),
       r.feeApplied && burned ? burnStat : h("div", { class: "stat" }, h("p", { class: "overline" }, "fee"), h("p", { class: "stat-v" }, "0"), h("p", { class: "stat-s" }, isBurnOut(o) ? `no fee into ${burnSym()}` : "no fee on this run"))),
-    h("div", { class: "result-actions" }, h("button", { class: "btn-ghost sm", type: "button", onclick: copySummary }, icon("copy", "i i-sm"), "copy summary")),
+    h("div", { class: "result-actions" }, h("button", { class: "btn-ghost sm", type: "button", onclick: copySummary }, icon("copy", "i i-sm"), "copy summary"), h("span", { id: "resRc", class: "res-rc" })),
     bad.length > 0 && h("p", { class: "result-note" }, `“Preview ${bad.length === 1 ? "that one" : `the ${bad.length}`} again” builds a fresh preview of just ${bad.length === 1 ? "that token" : "those tokens"}. The ones that landed are done and won’t be sent again. Transactions that failed or expired took no fee.`));
   const host = burnStat.querySelector(".odo-host");
   if (r.feeApplied && burned) odometer(host, int(burned), burnStat);
+  renderResultReclaim();
 }
 function odometer(host, str, stat) {
   if (reduced()) { host.textContent = str; return; }
@@ -2076,6 +2197,8 @@ async function copySummary() {
 function dustAgain() {
   if (state.busy) return;
   state.epoch++; state.run = null; state.plan = null;
+  // straight from a cleanup that started on the landing: the pockets were never read for this wallet
+  if (state.rowsFor !== state.account?.address) { go("pockets", { back: true }).then(() => loadHoldings()); return; }
   go("pockets", { back: true }).then(() => {
     autoSelect(true);
     setPose(sceneMascot("pockets"), state.rows.some((r) => r.usd != null) ? 2 : 13);
@@ -2097,6 +2220,793 @@ async function retryMints(items) {
   startPreview([...state.selected]);
 }
 
+/* ================= SC. 01 · the cleanup: rent back from token accounts ================= */
+// Every token account locks ~0.002 SOL of rent. Empty ones can be closed and the rent goes back to the wallet,
+// with no fee. Worthless dust can optionally be burned first (irreversible, off by default, confirmed by hand).
+// The sign → send → confirm path is the swaps' own: /api/refresh right before one wallet prompt, /api/send,
+// /api/status polling, never re-signed once anything went out.
+const rcList = () => state.rc.accounts || [];
+const rcMine = () => !!state.account && state.rc.owner === state.account.address;
+const rcAcc = (addr) => rcList().find((a) => a.address === addr);
+const rcEmpty = (a) => a.closable && a.amount === "0";
+const rcWsol = (a) => a.closable && a.native && a.amount !== "0";
+const rcCandidates = () => rcList().filter((a) => a.closable); // empty ones, plus wrapped SOL (closing unwraps it)
+// "Burn & close": which accounts could be burned, value permitting, is known from the RPC read alone; which ones are
+// actually offered needs prices, and those cost Jupiter quota, so they're read only once the burn section is opened.
+const rcPricedOk = () => state.rc.priced && !state.rc.priceError;
+const rcBurnCands = () => rcList().filter((a) => a.burnCandidate);
+const rcBurnables = () => (rcPricedOk() ? rcList().filter((a) => a.burnable) : []);
+// Priced dust under $1 can be picked all at once. Dust with no price has an unknown value (Jupiter has no price for
+// plenty of tokens worth something), so it's listed apart and every one of those is ticked by hand.
+const rcBurnPriced = () => rcBurnables().filter((a) => a.usd != null).sort((a, b) => a.usd - b.usd);
+const rcBurnUnpriced = () => rcBurnables().filter((a) => a.usd == null);
+const rcBlocked = (a) => !a.closable && !a.burnCandidate && a.reason !== "has balance";
+// still holding tokens the cleanup leaves alone: NFTs and the burn token always, and once priced, dust worth $1 or more
+const rcHolding = () => rcList().filter((a) => a.reason === "has balance" && (!a.burnCandidate || (rcPricedOk() && !a.burnable)));
+const rcHasWork = () => rcCandidates().length > 0 || (rcPricedOk() ? rcBurnables().length > 0 : rcBurnCands().length > 0);
+const rcEmptiesMine = () => (rcMine() ? rcList().filter(rcEmpty) : []);
+const rcBack = (a) => (a.native ? a.lamports : a.rentLamports); // closing wrapped SOL also unwraps its balance
+const rcPicked = () => rcList().filter((a) => state.rc.sel.has(a.address) || (state.rc.burnAck && state.rc.burnSel.has(a.address)));
+const rcTotal = () => rcPicked().reduce((s, a) => s + rcBack(a), 0);
+const rcLabel = (a) => (looksSpam(a) ? short(a.mint) : a.symbol || short(a.mint));
+const pad2 = (i) => String(i + 1).padStart(2, "0");
+const lamSum = (list) => list.reduce((s, a) => s + a.rentLamports, 0);
+
+function normAccount(a) {
+  if (!a || typeof a.address !== "string" || !B58RE.test(a.address) || typeof a.mint !== "string" || !B58RE.test(a.mint)) return null;
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+  const str = (v, n) => (typeof v === "string" && v ? v.slice(0, n) : null);
+  return {
+    address: a.address, mint: a.mint, program: a.program === "token-2022" ? "token-2022" : "token",
+    amount: typeof a.amount === "string" && /^\d{1,30}$/.test(a.amount) ? a.amount : "0", uiAmount: num(a.uiAmount),
+    frozen: !!a.frozen, native: !!a.native, rentLamports: num(a.rentLamports), lamports: num(a.lamports),
+    closable: !!a.closable, burnable: !!a.burnable, burnCandidate: !!a.burnCandidate, reason: str(a.reason, 80), withheld: !!a.withheld,
+    symbol: str(a.symbol, 32), name: str(a.name, 64), verified: !!a.verified,
+    usd: typeof a.usd === "number" && Number.isFinite(a.usd) ? a.usd : null,
+  };
+}
+
+// RPC only, unless `prices`: then the server also prices the accounts that still hold something (Jupiter), which
+// only the burn section needs. The empty-pockets line and card, the cleanup list and the post-run refresh never ask.
+async function loadAccounts({ silent = false, prices = false } = {}) {
+  if (!state.account) return;
+  const rc = state.rc, addr = state.account.address, seq = ++rc.seq;
+  if (prices) { rc.pricing = true; rc.pricingError = null; rc.built = null; renderCleanup(); }
+  if (!silent) {
+    rc.loading = true; rc.error = null;
+    if (rc.owner !== addr) rc.accounts = null;
+    if (!rc.accounts) setPose(sceneMascot("cleanup"), 12, { mode: "wiggle" });
+    renderCleanup(); renderBar();
+  }
+  let res;
+  try {
+    res = await api("/api/accounts?owner=" + encodeURIComponent(addr) + (prices ? "&prices=1" : ""));
+    if (!Array.isArray(res?.accounts)) throw new ApiError("Unexpected response from the server.", 500);
+  } catch (e) {
+    if (seq !== rc.seq || state.account?.address !== addr) return;
+    rc.loading = false;
+    if (rc.pricing) { rc.pricing = false; rc.built = null; }
+    if (prices) { rc.pricingError = e.message; if (e.status === 429) startCooldown(30); }
+    // a failed background read keeps whatever is on screen; only a visible load shows the error
+    if (!silent) { rc.error = e.message; if (e.status === 429) startCooldown(30); setPose(sceneMascot("cleanup"), 4); }
+    renderCleanup(); renderRentCard(); renderBar();
+    return;
+  }
+  if (seq !== rc.seq || state.account?.address !== addr) return;
+  const first = rc.owner !== addr || !rc.accounts;
+  rc.loading = false; rc.error = null; rc.owner = addr; rc.at = Date.now();
+  rc.priced = !!res.priced; rc.priceError = !!res.priceError; rc.pricing = false; rc.pricingError = null;
+  // the biggest rent first (Token-2022 accounts hold a little more), then by name
+  rc.accounts = res.accounts.map(normAccount).filter(Boolean)
+    .sort((a, b) => (b.rentLamports - a.rentLamports) || (a.symbol || "~").localeCompare(b.symbol || "~"));
+  const by = new Map(rc.accounts.map((a) => [a.address, a]));
+  if (rc.pendingSel) {
+    // "try again" after a run: exactly the accounts that didn't close, if they still can
+    rc.sel = new Set([...rc.pendingSel].filter((x) => by.get(x)?.closable));
+    rc.burnSel.clear(); rc.burnAck = false; rc.pendingSel = null; rc.resetSel = false;
+  } else if (first || rc.resetSel) {
+    // every empty account is picked, up to one run's worth; wrapped SOL and burns are always picked by hand
+    rc.sel = new Set(rc.accounts.filter(rcEmpty).slice(0, RC_MAX).map((a) => a.address));
+    rc.burnSel.clear(); rc.burnAck = false; rc.resetSel = false;
+  } else {
+    rc.sel = new Set([...rc.sel].filter((x) => by.get(x)?.closable));
+    rc.burnSel = new Set([...rc.burnSel].filter((x) => by.get(x)?.burnable));
+  }
+  rcBackfillNames();
+  if (state.scene === "cleanup" && !rc.plan && !rc.building) setPose(sceneMascot("cleanup"), rcHasWork() ? 2 : 13);
+  renderCleanup(); renderRentCard(); renderResultReclaim(); renderBar();
+  if (state.scene === "pockets" && !state.loading && !state.loadError && !state.rows.some((r) => r.usd != null && !isBurnRow(r))) renderPockets();
+}
+const rcLoadPrices = () => { if (!state.busy && !state.rc.pricing) loadAccounts({ silent: true, prices: true }); };
+
+// Jupiter doesn't know every token. Names read on-chain for the cleanup fill the gaps in the pockets list (the
+// unpriced rows), still as untrusted text, still unverified.
+function rcBackfillNames() {
+  if (!rcMine() || !state.rows.length) return;
+  const by = new Map(rcList().map((a) => [a.mint, a]));
+  let changed = false;
+  for (const r of state.rows) {
+    const a = by.get(r.mint);
+    if (!r.symbol && a?.symbol) { r.symbol = a.symbol; r.name = r.name || a.name; changed = true; }
+  }
+  if (changed && state.scene === "pockets") renderPocketsMeta();
+}
+
+/* the empty-pockets line and card in the pockets scene, and the offer on the result */
+function renderRentCard() {
+  const e = rcEmptiesMine(), lam = lamSum(e), dollars = solUsd(lam);
+  // The line under the title is how the offer gets seen: the card sits at the end of the aside (so nothing the user
+  // may be tapping moves when it appears), which is below the fold more often than not. The account read starts
+  // together with the holdings read, so the line is usually there before the list is.
+  const line = $("#pkRentLine");
+  const listShown = !state.loading && !state.loadError && state.rows.some((r) => r.usd != null && !isBurnRow(r));
+  line.hidden = !e.length || !listShown;
+  if (!line.hidden) fill(line, h("button", { class: "btn-text sm rent-link", type: "button", disabled: !!state.busy, onclick: () => openCleanup() },
+    icon("spark", "i i-sm"), h("span", {}, `Also: ${plural(e.length, "empty account")} ${e.length === 1 ? "holds" : "hold"} ${solApprox(lam)} SOL of rent`), h("span", { class: "m-hide" }, " · reclaim"), icon("arrow", "i i-sm")));
+  const card = $("#rentCard"); if (!card) return;
+  card.hidden = !e.length || state.loading || !!state.loadError;
+  if (card.hidden) return;
+  fill(card,
+    h("div", { class: "rent-txt" },
+      h("p", { class: "overline" }, "empty pockets"),
+      h("p", { class: "rent-line" }, h("b", {}, plural(e.length, "empty account")), ` holding ${solApprox(lam)} SOL of rent${dollars ? ` (≈ ${dollars})` : ""}. No fee to get it back.`)),
+    h("button", { class: "btn-ghost sm", type: "button", disabled: !!state.busy, onclick: () => openCleanup() }, "reclaim", icon("arrow", "i i-sm")));
+}
+function renderResultReclaim() {
+  const slot = $("#resRc"), r = state.run;
+  if (!slot || !r?.done) return;
+  const e = rcEmptiesMine(), lam = lamSum(e);
+  // one action per viewport: after a partial cleanup the bar's "try again" already covers the accounts still open
+  const failed = r.kind === "reclaim" && r.items.some((i) => i.status !== "confirmed");
+  fill(slot, e.length > 0 && !failed && h("button", { class: "btn-ghost sm", type: "button", onclick: () => { if (!state.busy) openCleanup(); } },
+    r.kind === "reclaim" ? `clean up ${plural(e.length, "more account")} · ${solApprox(lam)} SOL` : `reclaim ${solApprox(lam)} SOL of rent`, icon("arrow", "i i-sm")));
+}
+
+function openCleanup({ select = null } = {}) {
+  if (state.busy || !state.account) return;
+  closeAllPops();
+  const rc = state.rc;
+  rc.plan = null; rc.notice = null; rc.building = null;
+  // where "back" goes and what it says: the pockets only when that's where the user came from
+  rc.from = state.scene === "cleanup" ? rc.from : state.scene;
+  if (select) rc.pendingSel = new Set(select);
+  const stale = !rcMine() || !rc.accounts || !!select || Date.now() - rc.at > 15_000;
+  go("cleanup").then(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+    if (stale) loadAccounts(); else { setPose(sceneMascot("cleanup"), 2); renderCleanup(); renderBar(); }
+  });
+}
+function leaveCleanup() {
+  if (state.busy) return;
+  state.rc.plan = null;
+  go("pockets", { back: true }).then(() => { if (state.rowsFor !== state.account?.address && !state.loading) loadHoldings(); });
+}
+function rcBackToList() {
+  if (state.busy) return;
+  state.rc.plan = null; state.rc.notice = null;
+  renderCleanup(); renderBar();
+  setPose(sceneMascot("cleanup"), 2);
+}
+$("#rcBack").addEventListener("click", () => {
+  if (state.busy === "building" && state.rc.building) return rcCancelBuild();
+  if (state.busy) return;
+  if (state.rc.plan) return rcBackToList();
+  leaveCleanup();
+});
+
+/* ---- rendering ---- */
+function renderCleanup() {
+  if (state.scene !== "cleanup") return;
+  const rc = state.rc;
+  $("#rcBack").lastChild.textContent = rc.building ? "cancel and go back" : rc.plan ? "back to the list" : rc.from === "pockets" ? "back to the pockets" : "to your dust";
+  $("#rcOver").textContent = rc.plan || rc.building ? "scene 02 · the sweep" : "scene 01 · the cleanup";
+  const note = $("#rcNotice");
+  note.hidden = !rc.notice || !!rc.building;
+  if (rc.notice) fill(note, icon("info"), h("span", {}, rc.notice));
+  renderSlate();
+  const quiet = !rc.plan && !rc.building && !rc.loading && !rc.error && rc.accounts && !rcHasWork();
+  // one mascot per viewport: the set piece replaces the cameo in the empty and error states
+  sceneMascot("cleanup").hidden = !!quiet || (!!rc.error && !rc.accounts);
+  if (rc.building) return drawRcBuilding();
+  if (rc.plan) return drawRcReview();
+  drawRcPick();
+}
+
+// what can't be closed, with the reason for each; shown in the list and in the "nothing to close" state alike
+function rcBlockedBox(blocked) {
+  return blocked.length > 0 && h("details", { class: "hidden-list rc-blocked" },
+    h("summary", {}, h("span", {}, `${plural(blocked.length, "account")} can’t be closed`), icon("chev", "i i-sm")),
+    h("div", { class: "hidden-rows" }, blocked.map((a) => h("div", { class: "hrow" },
+      h("div", { style: "min-width:0" }, h("span", { class: "sym" }, rcLabel(a)), h("span", { class: "who-sub" }, rcBlockedWhy(a))),
+      h("span", { class: "who-sub mono" }, short(a.address))))));
+}
+
+function drawRcPick() {
+  const rc = state.rc, main = $("#rcMain"), aside = $("#rcAside"), hero = $("#rcHero");
+  if (!rc.accounts) {
+    hero.hidden = true; rc.built = null; rc.inputs.clear(); main.dataset.view = "";
+    if (rc.error) {
+      $("#rc-title").textContent = "couldn’t read the accounts";
+      $("#rcFacts").textContent = `${rc.error} Nothing was signed or sent.`;
+      fill(main, h("div", { class: "state-card" }, stateStill(4, "the lining’s stuck", "Give it a moment, then try again from the bar below.")));
+    } else {
+      $("#rc-title").textContent = "checkin’ the lining…";
+      $("#rcFacts").textContent = "Reading every token account, empty ones too. Nothing gets signed.";
+      fill(main, h("div", { class: "rows" }, Array.from({ length: 5 }, (_, i) => h("div", { class: "row skel", "aria-hidden": "true" },
+        h("span", {}), h("span", { class: "sk", style: "width:22px;height:22px;border-radius:7px" }), h("span", { class: "sk", style: "width:36px;height:36px;border-radius:50%" }),
+        h("span", { style: "display:grid;gap:7px" }, h("span", { class: "sk", style: `width:${70 + ((i * 37) % 60)}px` }), h("span", { class: "sk", style: `width:${120 + ((i * 53) % 70)}px;height:9px` })),
+        h("span", { class: "sk", style: "width:52px" })))));
+    }
+    aside.replaceChildren(rcHowCard());
+    return;
+  }
+  const empties = rcList().filter(rcEmpty), wsol = rcList().filter(rcWsol), burnCands = rcBurnCands();
+  // Nothing to close, only accounts that still hold something: burning is the only thing left to offer, so the
+  // prices are worth reading right away (and if none of it is under $1, this becomes "nothing to close").
+  if (!rcCandidates().length && burnCands.length && !rc.priced && !rc.pricing && !rc.pricingError && !state.busy) { rc.burnOpen = true; rcLoadPrices(); }
+  const blocked = rcList().filter(rcBlocked), holding = rcHolding(), lamAll = lamSum(empties);
+  if (!rcHasWork()) {
+    hero.hidden = true; rc.built = null; rc.inputs.clear(); main.dataset.view = "";
+    $("#rc-title").textContent = "no lint here";
+    const holds = holding.length === 1 ? "holds" : "hold";
+    $("#rcFacts").textContent = blocked.length
+      ? `${plural(blocked.length, "token account")} can’t be closed by this wallet (the reasons are below)${holding.length ? `, and ${plural(holding.length, "other")} still ${holds} something worth keeping or selling` : ""}.`
+      : holding.length ? "Every token account in this wallet still holds something worth keeping or selling, so there’s nothing to close."
+      : "This wallet has no token accounts besides SOL itself, so there’s nothing to close.";
+    // the bar carries "back to your dust"; the card only offers what the bar doesn't
+    fill(main, h("div", { class: "state-card" }, stateStill(13, "not a speck of lint", blocked.length ? "Dusty found accounts, but this wallet isn’t allowed to close them." : "Dusty turned out every pocket. Empty accounts show up here after you sell or send tokens."),
+      h("div", { class: "state-actions" }, h("button", { class: "btn-text sm", type: "button", onclick: () => loadAccounts() }, icon("refresh", "i i-sm"), "check again"))),
+      rcBlockedBox(blocked));
+    aside.replaceChildren();
+    return;
+  }
+  hero.hidden = false; hero.classList.remove("compact", "stale");
+  $("#rc-title").textContent = "empty pockets";
+  const dollars = solUsd(lamAll);
+  $("#rcFacts").textContent = empties.length
+    ? `${plural(empties.length, "empty token account")} holding about ${solAmt(lamAll)} SOL of rent${dollars ? ` (≈ ${dollars})` : ""}. Closing an account sends its rent back to your wallet. No fee.${empties.length > RC_MAX ? ` Up to ${RC_MAX} per run, so the first ${RC_MAX} are picked; run it again for the rest.` : ""}`
+    : `No empty token accounts right now.${wsol.length ? " Wrapped SOL can be unwrapped below." : ""}${burnCands.length ? " Leftover dust under $1 can be burned and closed below, if you choose to." : ""}`;
+  // Rows are built once per read and patched afterwards, so ticking a box never moves focus or scroll. The review
+  // and the build progress replace #rcMain, so coming back from them always rebuilds.
+  if (rc.built !== rc.accounts || main.dataset.view !== "pick") {
+    const act = document.activeElement, focusAddr = act?.closest?.("#rcMain") ? act.dataset.addr || null : null;
+    rc.inputs.clear();
+    const all = h("input", { type: "checkbox", class: "cb-input", id: "rcAll" });
+    all.addEventListener("change", () => {
+      if (state.busy) return;
+      if (all.checked) { const room = RC_MAX - (rc.burnAck ? rc.burnSel.size : 0) - wsol.filter((a) => rc.sel.has(a.address)).length; rc.sel = new Set([...wsol.filter((a) => rc.sel.has(a.address)).map((a) => a.address), ...rcList().filter(rcEmpty).slice(0, Math.max(0, room)).map((a) => a.address)]); }
+      else for (const a of empties) rc.sel.delete(a.address);
+      syncCleanup();
+    });
+    const burnAck = h("input", { type: "checkbox", id: "rcBurnAck" });
+    burnAck.addEventListener("change", () => {
+      if (state.busy) { burnAck.checked = rc.burnAck; return; }
+      rc.burnAck = burnAck.checked;
+      if (!rc.burnAck) rc.burnSel.clear();
+      syncCleanup();
+    });
+    // A wallet with 1,300 empty accounts gets the first rows and a "show more", so what comes after the list (the
+    // burn section, what can't be closed) stays within reach. Unshown accounts can still be picked: "select all"
+    // and the default pick work on the whole list.
+    const list = h("div", { class: "rows rc-rows", id: "rcList", role: "group", "aria-label": "Empty token accounts" });
+    const fillList = () => {
+      const have = list.children.length;
+      list.append(...empties.slice(have, Math.max(have, rc.showN)).map((a, j) => rcRow(a, have + j, "close")));
+    };
+    fillList();
+    const more = h("button", { class: "btn-ghost sm rc-more", type: "button", id: "rcMore", onclick: () => { if (state.busy) return; rc.showN += 200; fillList(); syncCleanup({ bar: false }); } });
+    const big = holding.filter((a) => a.burnCandidate).length, kept = holding.length - big;
+    fill(main,
+      wsol.length > 0 && h("div", { class: "rc-wsol" },
+        h("div", { class: "overline list-label" }, h("span", {}, "wrapped SOL · picked by hand"), h("span", { class: "tl-col" }, "back")),
+        h("div", { class: "rows rc-rows", role: "group", "aria-label": "Wrapped SOL" }, wsol.map((a, i) => rcRow(a, i, "close")))),
+      empties.length > 0 && h("div", { class: "tracklist rc-tracklist" },
+        h("div", { class: "tl-head" },
+          h("label", { class: "tl-all" }, all, h("span", { class: "cb", "aria-hidden": "true" }, icon("spark", "i"), h("i", { class: "dash" })), h("span", { id: "rcAllLabel" })),
+          h("button", { class: "btn-text sm", type: "button", onclick: () => { if (state.busy) return; for (const a of empties) rc.sel.delete(a.address); syncCleanup(); } }, "clear"),
+          h("span", { class: "tl-col" }, "rent back")),
+        list, more),
+      burnCands.length > 0 && rcBurnBox(burnAck),
+      rcBlockedBox(blocked),
+      holding.length > 0 && h("p", { class: "hint rc-holding" }, [
+        `${plural(holding.length, "other account")} still ${holding.length === 1 ? "holds" : "hold"} tokens the cleanup leaves alone.`,
+        big && `${big === holding.length ? (big === 1 ? "It’s" : "They’re") : `${big} ${big === 1 ? "is" : "are"}`} worth $1 or more: sell ${big === 1 ? "it" : "them"} in the pockets, which closes the account too.`,
+        kept && "NFTs and the burn token are never burned here."].filter(Boolean).join(" ")));
+    rc.built = rc.accounts; main.dataset.view = "pick";
+    if (focusAddr) rc.inputs.get(focusAddr)?.focus({ preventScroll: true });
+    aside.replaceChildren(rcHowCard());
+  }
+  syncCleanup({ bar: false });
+}
+function rcBurnBox(burnAck) {
+  const rc = state.rc, priced = rcBurnPriced(), unpriced = rcBurnUnpriced();
+  const selectAll = h("button", { class: "btn-text sm", type: "button", id: "rcBurnAll", onclick: () => {
+    if (state.busy || !rc.burnAck) return;
+    // "select all" never includes the unpriced ones: those are picked one by one
+    const keep = unpriced.filter((a) => rc.burnSel.has(a.address)).map((a) => a.address);
+    const room = RC_MAX - rc.sel.size - keep.length;
+    rc.burnSel = new Set([...keep, ...priced.slice(0, Math.max(0, room)).map((a) => a.address)]);
+    syncCleanup();
+  } }, "select all under $1");
+  const clear = h("button", { class: "btn-text sm", type: "button", onclick: () => { if (state.busy) return; rc.burnSel.clear(); syncCleanup(); } }, "clear");
+  const body = !rcPricedOk()
+    ? h("p", { class: "hint rc-pricing", role: "status" }, rc.pricing ? [h("span", { class: "spin" }), "Checking what these are worth…"]
+      : rc.pricingError || rc.priceError ? ["Prices couldn’t be checked just now, so nothing is offered for burning. ", h("button", { class: "btn-text sm", type: "button", "data-cd": "try again", onclick: rcLoadPrices }, "try again")]
+      : "Open this section to check what they’re worth.")
+    : !priced.length && !unpriced.length ? h("p", { class: "hint rc-pricing" }, "None of them is worth less than $1 right now, so there’s nothing to burn.")
+    : [priced.length > 0 && [
+        h("div", { class: "rc-burn-head" }, h("p", { class: "overline" }, `under $1 · ${priced.length}`), h("div", { class: "rc-burn-tools" }, selectAll, clear)),
+        h("div", { class: "rows rc-rows", role: "group", "aria-label": "Dust worth less than $1" }, priced.map((a, i) => rcRow(a, i, "burn")))],
+      unpriced.length > 0 && [
+        h("div", { class: "rc-burn-head" }, h("p", { class: "overline pink" }, `no price · value unknown · ${unpriced.length}`),
+          h("p", { class: "hint" }, "Jupiter has no price for these, so there’s no telling what they’re worth. Tick one only if you’re sure it’s junk."),
+          !priced.length && h("div", { class: "rc-burn-tools" }, clear)),
+        h("div", { class: "rows rc-rows", role: "group", "aria-label": "Tokens with no price, value unknown" }, unpriced.map((a, i) => rcRow(a, priced.length + i, "burn")))]];
+  const box = h("details", { class: "hidden-list rc-burn", id: "rcBurnBox" },
+    h("summary", {}, icon("flame", "i i-sm pinkt rc-flame"), h("span", { id: "rcBurnSum" }), icon("chev", "i i-sm")),
+    h("div", { class: "hidden-rows" },
+      h("div", { class: "warn-card rc-warn", role: "group", "aria-label": "Burning is irreversible" },
+        h("p", { class: "warn-title" }, icon("warn"), "burning is forever"),
+        h("p", {}, "Burning destroys these tokens, then closes the account for its rent. It’s for spam and dead tokens. Nothing is sold, and it can’t be undone. Anything you’d rather turn into SOL, sell in the pockets instead."),
+        h("label", { class: "toggle sm" }, burnAck, h("span", { class: "tg", "aria-hidden": "true" }), h("span", {}, "I understand: burned tokens are gone for good"))),
+      body));
+  box.open = rc.burnOpen;
+  // opening the section is what asks for prices (the only Jupiter call the cleanup makes before a build)
+  box.addEventListener("toggle", () => { rc.burnOpen = box.open; if (box.open && !rc.priced && !rc.pricing && !rc.pricingError) rcLoadPrices(); });
+  return box;
+}
+function rcBlockedWhy(a) {
+  if (a.frozen || a.reason === "frozen") return "Frozen by the token’s issuer, so it can’t be closed.";
+  if (a.reason === "close authority is someone else") return "Another address holds the right to close it, so this wallet can’t.";
+  return a.reason ? a.reason.charAt(0).toUpperCase() + a.reason.slice(1) + "." : "Can’t be closed right now.";
+}
+function rcRow(a, i, kind) {
+  const rc = state.rc, spam = looksSpam(a), burn = kind === "burn", back = solAmt(rcBack(a));
+  const input = h("input", { type: "checkbox", class: "cb-input", "data-addr": a.address, "data-kind": kind,
+    "aria-label": burn ? `Burn and close ${rcLabel(a)}, ${a.usd == null ? "no price, value unknown" : `worth ${usdP(a.usd)}`}, ${back} SOL back` : `Close ${a.native ? "wrapped SOL" : rcLabel(a)}, ${back} SOL back` });
+  rc.inputs.set(a.address, input);
+  // flags the user can't act on live in the sub-line, so the name keeps the top line to itself on a phone
+  const t22 = a.program === "token-2022" ? " · token-2022" : "";
+  const fees = a.withheld ? " · withheld fees go to the mint first" : "";
+  const sub = burn
+    ? [`${amt(a.uiAmount)} left · `, a.usd == null ? h("span", { class: "pinkt" }, "value unknown") : "could be sold instead", t22]
+    : a.native ? `unwraps ${solAmt(a.lamports - a.rentLamports)} SOL + rent`
+    : !a.symbol && !a.name ? ["no name on-chain", t22, fees]
+    : [!spam && a.name ? h("span", { class: "nm" }, a.name + " · ") : "", h("span", { class: "mono" }, short(a.mint)), t22, fees];
+  const name = spam ? [h("span", { class: "m-hide" }, "name hidden: likely spam"), h("span", { class: "m-show" }, "likely spam")] : a.native ? "wrapped SOL" : rcLabel(a);
+  const el = h("label", { class: "row rc-row" + (burn ? " burn" : "") },
+    h("span", { class: "tno" }, pad2(i)), input,
+    h("span", { class: "cb", "aria-hidden": "true" }, icon("spark"), h("i", { class: "dash" })),
+    tokIcon(a),
+    h("span", { class: "who" }, h("span", { class: "who-top" }, h("span", { class: "sym" }, name)), h("span", { class: "who-sub" }, sub)),
+    // a burn row leads with what's being destroyed; the rent coming back is the small print
+    burn ? h("span", { class: "worth" }, h("b", { class: a.usd == null ? "pinkt" : null }, a.usd == null ? "no price" : usdP(a.usd)), h("span", {}, `+${back} SOL`))
+      : h("span", { class: "worth" }, h("b", {}, `+${back}`), h("span", {}, "SOL")));
+  input.addEventListener("change", () => {
+    const set = burn ? rc.burnSel : rc.sel;
+    if (state.busy || (burn && !rc.burnAck)) { input.checked = set.has(a.address); return; }
+    if (input.checked && rcPicked().length >= RC_MAX) { input.checked = false; toast({ title: `${RC_MAX} per run`, body: "That’s as many as one wallet prompt carries. Run the cleanup again for the rest." }); return; }
+    if (input.checked) set.add(a.address); else set.delete(a.address);
+    syncCleanup();
+    if (input.checked && !burn) react(9, 2, 800);
+  });
+  return el;
+}
+function syncCleanup({ bar = true } = {}) {
+  const rc = state.rc, busy = !!state.busy, picked = rcPicked(), full = picked.length >= RC_MAX;
+  for (const [addr, inp] of rc.inputs) {
+    const burn = inp.dataset.kind === "burn", on = burn ? rc.burnAck && rc.burnSel.has(addr) : rc.sel.has(addr);
+    inp.checked = on;
+    inp.disabled = busy || (burn && !rc.burnAck) || (!on && full);
+    inp.closest(".row")?.classList.toggle("off", inp.disabled && !on);
+  }
+  const em = rcList().filter(rcEmpty);
+  const all = $("#rcAll");
+  if (all) {
+    const on = em.filter((a) => rc.sel.has(a.address)).length, cap = Math.min(em.length, RC_MAX), n = em.length.toLocaleString("en-US");
+    all.checked = cap > 0 && on >= cap; all.indeterminate = on > 0 && on < cap; all.disabled = busy || !em.length;
+    fill($("#rcAllLabel"), em.length > RC_MAX ? [h("span", { class: "m-hide" }, "select "), `${RC_MAX} of ${n}`] : `select all empty (${n})`);
+  }
+  const more = $("#rcMore"), list = $("#rcList");
+  if (more && list) {
+    const shownN = list.children.length, left = em.length - shownN, pickedHidden = em.slice(shownN).filter((a) => rc.sel.has(a.address)).length;
+    more.hidden = left <= 0; more.disabled = busy;
+    more.textContent = `show ${Math.min(200, left).toLocaleString("en-US")} more · ${plural(left, "account")} not shown${pickedHidden ? `, ${pickedHidden.toLocaleString("en-US")} of them picked` : ""}`;
+  }
+  const ack = $("#rcBurnAck");
+  if (ack) { ack.checked = rc.burnAck; ack.disabled = busy || rc.priceError; }
+  const bAll = $("#rcBurnAll"); if (bAll) bAll.disabled = busy || !rc.burnAck;
+  const bs = $("#rcBurnSum");
+  if (bs) {
+    const b = rcBurnables(), on = rc.burnAck ? b.filter((a) => rc.burnSel.has(a.address)).length : 0;
+    bs.textContent = !rcPricedOk()
+      ? `burn & close leftover dust (under $1) · ${plural(rcBurnCands().length, "account")} with a balance`
+      : `burn & close leftover dust (under $1) · ${on ? `${on} of ${b.length} picked` : b.length ? plural(b.length, "account") : "none under $1"}${b.length ? ` · +${solAmt(lamSum(b))} SOL` : ""}`;
+  }
+  rcHeroPick(picked);
+  if (bar) renderBar();
+}
+function rcHeroPick(picked = rcPicked()) {
+  const rc = state.rc, burns = picked.filter((a) => rc.burnSel.has(a.address)).length, wsolN = picked.filter((a) => a.native).length;
+  const back = picked.reduce((s, a) => s + rcBack(a), 0), dollars = solUsd(back);
+  fill($("#rcHero"),
+    h("div", { class: "ch-block" }, h("p", { class: "overline" }, "closing"), h("p", { class: "ch-big" }, String(picked.length), h("small", {}, picked.length === 1 ? "account" : "accounts")),
+      h("p", { class: "ch-sub" }, burns ? `${burns} burned first, for good` : wsolN ? "incl. wrapped SOL" : `of ${plural(rcList().filter(rcEmpty).length, "empty account")}`)),
+    svgArrow(),
+    h("div", { class: "ch-block ch-out" }, h("p", { class: "overline" }, "you get back"), h("p", { class: "ch-big" }, solApprox(back), h("small", {}, "SOL")),
+      h("p", { class: "ch-sub" }, picked.length ? ["rent back", h("span", { class: "m-hide" }, " to your wallet"), " · no fee"] : "pick accounts to see the total"),
+      picked.length > 0 && dollars && h("p", { class: "ch-sub ch-usd" }, `≈ ${dollars} at today’s SOL price`)));
+}
+function rcHowCard() {
+  return h("div", { class: "card" }, h("p", { class: "overline" }, "how the cleanup works"), h("ul", { class: "ask-list" },
+    h("li", {}, icon("spark"), h("span", {}, "Every token account holds about ", h("b", {}, "0.002 SOL of rent"), ". Closing an empty one sends it back to your wallet.")),
+    h("li", {}, icon("spark"), h("span", {}, h("b", {}, "No fee. "), "Duster adds nothing to these transactions. You pay only the network fee, a fraction of a cent each.")),
+    h("li", {}, icon("wallet"), h("span", {}, "About 25 closes fit in one transaction, and your wallet asks once for all of them.")),
+    h("li", {}, icon("spark"), h("span", {}, "Nothing is lost: if a token comes back to this wallet later, a new account is opened for it then."))));
+}
+
+function drawRcBuilding() {
+  const b = state.rc.building, hero = $("#rcHero");
+  state.rc.built = null; $("#rcMain").dataset.view = "building"; // this replaces the list; going back rebuilds it
+  $("#rc-title").textContent = "baggin’ the lint…";
+  $("#rcFacts").textContent = "Re-reading every account, packing them into transactions and simulating each one. Nothing gets signed.";
+  hero.hidden = false; hero.classList.add("compact"); hero.classList.remove("stale");
+  fill(hero, h("p", { class: "ch-line" }, h("b", {}, plural(b.n, "account")), icon("arrow", "i"), h("b", { class: "ch-line-out" }, `${solApprox(b.back)} SOL`), h("span", {}, "back to your wallet")));
+  fill($("#rcMain"),
+    h("div", { class: "progress" }, h("div", { class: "progress-track" }, h("span", { class: "progress-fill", style: "width:38%" })), h("p", { class: "progress-label" }, `packing and simulating ${plural(b.n, "close")}…`)),
+    h("ol", { class: "tx-list" }, Array.from({ length: Math.min(4, Math.max(1, Math.ceil(b.n / 25))) }, (_, i) => h("li", { class: "tx" },
+      h("span", { class: "tno" }, pad2(i)), h("span", { class: "sk", style: "width:36px;height:36px;border-radius:50%" }),
+      h("span", { style: "display:grid;gap:7px" }, h("span", { class: "sk", style: "width:90px" }), h("span", { class: "sk", style: "width:160px;height:9px" })),
+      h("span", { class: "pill" }, h("span", { class: "spin" }), "checking")))));
+  rc_aside(h("div", { class: "card" }, h("p", { class: "overline" }, "while you wait"), h("ul", { class: "ask-list" },
+    h("li", {}, icon("spark"), h("span", {}, "Every account is re-read on the server. Nothing from this page is trusted.")),
+    h("li", {}, icon("spark"), h("span", {}, "Every transaction is simulated before you see it.")),
+    h("li", {}, icon("spark"), h("span", {}, "Accounts that can’t close are skipped, with the reason.")))));
+}
+const rc_aside = (...cards) => $("#rcAside").replaceChildren(...cards.filter(Boolean));
+
+// named, non-spam accounts first: they're the ones that will show a picture rather than a letter
+const rcIcoScore = (a) => (a.native ? 3 : !looksSpam(a) && a.symbol ? 2 : 0) + (Date.now() - (badImg.get(a.mint) ?? -Infinity) < 180_000 ? -2 : 0);
+function rcTxLi(t, i, { right = null, note = null, gone = false, details = true } = {}) {
+  const accts = t.accounts, burns = accts.filter((a) => a.action !== "close"), n = accts.length;
+  const labels = accts.map(rcLabel);
+  const names = labels.length > 4 ? `${labels.slice(0, 4).join(", ")} +${labels.length - 4} more` : labels.join(", ");
+  return h("li", { class: "tx rc-tx" },
+    h("span", { class: "tno" }, pad2(i)),
+    h("span", { class: "ico-stack", "aria-hidden": "true" }, [...accts].sort((a, b) => rcIcoScore(b) - rcIcoScore(a)).slice(0, 2).map((a) => tokIcon(a)), n > 2 && h("span", { class: "ico-more" }, `+${n - 2}`)),
+    h("div", { style: "min-width:0" },
+      h("p", { class: "who-top" }, h("span", { class: "sym" }, burns.length ? `${plural(n - burns.length, "close")} · ${burns.length} burn${burns.length === 1 ? "" : "s"}` : plural(n, "close"))),
+      h("p", { class: "tx-flow" }, h("span", {}, names), icon("arrow", "i"), h("b", { class: gone ? "gone" : null }, `+${solAmt(t.lamports)} SOL`), gone && h("span", { class: "gone-l" }, " · not received")),
+      burns.length > 0 && h("p", { class: "tx-burn" }, icon("flame", "i"), `burns ${burns.map(rcLabel).join(", ")} for good`)),
+    right || h("div", { class: "tx-right" }),
+    details && h("details", {}, h("summary", {}, `${plural(n, "account")}`), h("ul", { class: "rc-accts" }, accts.map((a) => h("li", {},
+      h("span", { class: "rc-a-name" }, rcLabel(a)), h("span", { class: "mono" }, short(a.address)),
+      h("span", { class: a.action === "close" ? "" : "pinkt" }, a.action === "close" ? (a.native ? `unwrap +${solAmt(a.lamports)}` : `+${solAmt(a.lamports)}`) : `burn · +${solAmt(a.lamports)}`))))),
+    note);
+}
+function drawRcReview() {
+  const rc = state.rc, p = rc.plan, n = p.txs.length, hero = $("#rcHero");
+  rc.built = null; $("#rcMain").dataset.view = "review"; // this replaces the list; "back to the list" rebuilds it
+  const back = p.txs.reduce((s, t) => s + t.lamports, 0), accts = p.txs.reduce((s, t) => s + t.accounts.length, 0);
+  const burns = p.txs.reduce((s, t) => s + t.accounts.filter((a) => a.action !== "close").length, 0), unwrap = p.txs.some((t) => t.accounts.some((a) => a.native));
+  const fee = p.txs.reduce((s, t) => s + t.feeLamports, 0);
+  $("#rc-title").textContent = n ? "review the sweep" : "nothing made the cut";
+  $("#rcFacts").textContent = n
+    ? `${plural(accts, "account")} in ${plural(n, "transaction")}. Your wallet will ask once${n > 1 ? ` for all ${n}` : ""}.${p.skipped.length ? ` Another ${p.skipped.length} ${p.skipped.length === 1 ? "was" : "were"} skipped (reasons below).` : ""}`
+    : "None of these accounts could be closed right now. Nothing was built or signed. Reasons are below.";
+  hero.classList.remove("compact");
+  hero.hidden = !n;
+  if (n) fill(hero,
+    h("div", { class: "ch-block" }, h("p", { class: "overline" }, "closing"), h("p", { class: "ch-big" }, String(accts), h("small", {}, accts === 1 ? "account" : "accounts")), h("p", { class: "ch-sub" }, `${plural(n, "transaction")} · 1\u00a0wallet\u00a0prompt`)),
+    svgArrow(),
+    h("div", { class: "ch-block ch-out" }, h("p", { class: "overline" }, "you get back"), h("p", { class: "ch-big" }, `${solApprox(back)}`, h("small", {}, "SOL")),
+      h("p", { class: "ch-sub" }, `${unwrap ? "rent plus unwrapped SOL" : "rent"} · no fee${burns ? ` · ${burns} burned` : ""}`),
+      solUsd(back) && h("p", { class: "ch-sub ch-usd" }, `≈\u00a0${solUsd(back)} at today’s SOL price`)));
+  const skipped = p.skipped.length > 0 && (() => {
+    const groups = [];
+    for (const s of p.skipped) { const g = groups.find((x) => x.reason === s.reason); if (g) g.items.push(s); else groups.push({ reason: s.reason, items: [s] }); }
+    const nameOf = (s) => { const a = rcAcc(s.address); return a ? rcLabel(a) : short(s.address); };
+    return h("div", { class: "skipped" }, h("p", { class: "overline" }, h("span", {}, `bonus tracks · skipped ${p.skipped.length}`)),
+      groups.map((g, gi) => {
+        const nm = g.items.map(nameOf);
+        return h("div", { class: "skip-row" }, h("span", { class: "tno" }, pad2(n + gi)),
+          h("div", { style: "min-width:0" }, h("span", { class: "skip-sym" }, nm.length > 6 ? `${nm.slice(0, 6).join(", ")} +${nm.length - 6} more` : nm.join(", ")),
+            g.items.length > 1 && h("span", { class: "skip-n" }, ` · ${g.items.length} accounts`),
+            h("p", { class: "skip-why" }, g.reason.charAt(0).toUpperCase() + g.reason.slice(1) + (/[.]$/.test(g.reason) ? "" : "."))));
+      }));
+  })();
+  fill($("#rcMain"),
+    h("div", { class: "overline list-label" }, h("span", {}, `tracklist · ${plural(n, "transaction")}`)),
+    h("ol", { class: "tx-list" }, p.txs.map((t, i) => {
+      const li = rcTxLi(t, i);
+      if (!p._shown && !reduced()) li.animate([{ opacity: 0, translate: "0 8px" }, { opacity: 1, translate: "0 0" }], { duration: 380, delay: Math.min(i, 14) * 35, easing: "cubic-bezier(.2,.8,.2,1)", fill: "backwards" });
+      return li;
+    })),
+    skipped);
+  p._shown = true;
+  rc_aside(
+    n > 0 && h("div", { class: "card ask-card" },
+      h("p", { class: "overline" }, "what your wallet will ask"),
+      h("h3", {}, `1 prompt · ${plural(n, "transaction")}`),
+      h("ul", { class: "ask-list" },
+        h("li", {}, icon("wallet"), h("span", {}, h("b", {}, `${state.wallet?.name || "Your wallet"} opens once`), " and asks you to approve ", h("b", {}, plural(n, "transaction")), `. ${n === 1 ? "It closes" : "Together they close"} ${plural(accts, "token account")}.`)),
+        h("li", {}, icon("arrow"), h("span", {}, "Coming in: ", h("b", {}, `${solApprox(back)} SOL`), unwrap ? ", rent plus your unwrapped SOL." : " of rent.")),
+        burns > 0 && h("li", { class: "ask-warn" }, icon("flame", "i pink"), h("span", {}, h("b", {}, `${plural(burns, "token")} ${burns === 1 ? "leaves" : "leave"} for good. `), `${burns === 1 ? "It’s" : "They’re"} burned, not sold, and that can’t be undone.`)),
+        // network fees are tiny (~0.000005 SOL each), so they get significant digits rather than four decimals
+        h("li", {}, icon("bolt"), h("span", {}, `Network fee about ${(fee / 1e9).toLocaleString("en-US", { maximumSignificantDigits: 2 })} SOL${n > 1 ? ` for all ${n}` : ""}, paid from your SOL balance.`)),
+        h("li", {}, icon("spark"), h("span", {}, "Check the balance changes it shows. Duster never holds your funds or keys, and nothing is sent until you approve.")))),
+    n > 0 && h("div", { class: "burn-card frame nofee-state" }, h("p", { class: "overline green" }, "no fee"),
+      h("p", { class: "hint", style: "color:var(--lav-2)" }, "Duster adds nothing to the cleanup. The rent goes back to the wallet that paid it.")));
+}
+
+/* ---- the bottom bar ---- */
+function renderCleanupBar(feeEl) {
+  const rc = state.rc;
+  // on the narrowest phones the bar hides the "≈ X SOL back" line, so the figure moves into this one there
+  const noFee = (lam = 0) => feeEl.replaceChildren(h("span", { class: "greent" }, lam > 0 && h("span", { class: "xs-show" }, `${solApprox(lam)} SOL · `), "no fee",
+    h("span", { class: "m-hide" }, " · the rent comes back to you"), h("span", { class: "m-show xs-hide" }, " · rent back")));
+  if (rc.building) {
+    $("#sumCount").textContent = "checking…"; $("#sumWorth").textContent = `${solApprox(rc.building.back)} SOL back`;
+    feeEl.replaceChildren(h("span", {}, "nothing gets signed yet"));
+    caption("baggin’ up the lint");
+    return setCta("building…", { disabled: true, busy: true, alt: { label: "cancel", run: rcCancelBuild } });
+  }
+  if (rc.plan) {
+    const n = rc.plan.txs.length;
+    $("#sumCount").textContent = n ? plural(n, "transaction") : "nothing to send";
+    const planBack = rc.plan.txs.reduce((s, t) => s + t.lamports, 0);
+    $("#sumWorth").textContent = n ? `${solApprox(planBack)} SOL back` : "";
+    if (n) noFee(planBack);
+    if (state.busy === "signing") { caption("stampin’ a fresh blockhash…"); return setCta("preparing…", { disabled: true, busy: true }); }
+    if (!n) { caption("nothing made the cut"); return setCta("back to the list", { action: rcBackToList }); }
+    caption(rc.plan.burns ? "lint’s bagged. burns are final, your call" : "lint’s bagged. your call");
+    return setCta(`approve ${n} in wallet`, { action: approveReclaim });
+  }
+  if (!rc.accounts) {
+    if (rc.error) {
+      $("#sumCount").textContent = "couldn’t load"; caption("the lining wouldn’t give");
+      feeEl.replaceChildren(h("span", {}, "nothing was signed or sent"));
+      const left = cooldownLeft();
+      return left > 0 ? setCta(`try again in ${left}s`, { disabled: true }) : setCta("try again", { action: () => loadAccounts() });
+    }
+    $("#sumCount").textContent = "reading accounts…"; feeEl.replaceChildren(h("span", {}, "nothing gets signed"));
+    caption("checkin’ the lining");
+    return setCta("loading…", { disabled: true, busy: true });
+  }
+  const picked = rcPicked(), n = picked.length, burns = picked.filter((a) => rc.burnSel.has(a.address)).length;
+  if (!rcHasWork()) {
+    $("#sumCount").textContent = "nothing to close"; feeEl.replaceChildren(h("span", {}, "nothing was signed or sent"));
+    caption("not a speck of lint");
+    return setCta("back to your dust", { action: leaveCleanup });
+  }
+  $("#sumCount").textContent = n ? plural(n, "account") : "nothing picked";
+  $("#sumWorth").textContent = n ? `${solApprox(rcTotal())} SOL back` : "";
+  noFee(n ? rcTotal() : 0);
+  if (!n) { caption("pick the empty pockets"); return setCta("pick some accounts", { disabled: true }); }
+  caption(burns ? "burns are final. double-check the list" : n >= 50 ? "that’s a lot of empty pockets" : "every empty pocket’s sittin’ on rent. let’s get it back");
+  return setCta(burns ? `review ${n} · ${burns} burn${burns === 1 ? "" : "s"}` : `review ${plural(n, "close")}`, { action: () => buildReclaim() });
+}
+
+/* ---- build, sign, send ---- */
+async function buildReclaim({ notice = null } = {}) {
+  const rc = state.rc;
+  if (state.busy || !state.account) return;
+  const picked = rcPicked().slice(0, RC_MAX);
+  if (!picked.length) return;
+  closeAllPops(); clearToasts();
+  const ep = ++state.epoch, ctrl = new AbortController(), owner = state.account.address;
+  const burn = rc.burnAck ? picked.filter((a) => rc.burnSel.has(a.address)).map((a) => a.address) : [];
+  const close = picked.filter((a) => rc.sel.has(a.address)).map((a) => a.address);
+  state.busy = "building"; rc.plan = null; rc.notice = notice;
+  rc.building = { ctrl, n: picked.length, back: picked.reduce((s, a) => s + rcBack(a), 0) };
+  window.scrollTo({ top: 0, behavior: reduced() ? "instant" : "smooth" });
+  setPose(sceneMascot("cleanup"), 12, { mode: "wiggle" });
+  renderCleanup(); renderBar();
+  let res;
+  try {
+    res = await api("/api/reclaim", { owner, close, burn }, { signal: ctrl.signal });
+  } catch (e) {
+    if (e.name === "AbortError" || ep !== state.epoch) return;
+    rc.building = null; setIdle();
+    if (e.status === 429) startCooldown(60);
+    renderCleanup(); renderBar();
+    setPose(sceneMascot("cleanup"), 4);
+    toast({ title: "couldn’t build the cleanup", body: `${e.message} Nothing was signed or sent.`, tone: "bad" });
+    return;
+  }
+  if (ep !== state.epoch) return;
+  // the server's re-read is what gets signed; names are kept with each account so the run can still label them
+  // after the list refreshes and the closed accounts are gone from it
+  const named = (x) => { const a = rcAcc(x.address); return { mint: x.mint, symbol: a?.symbol ?? null, name: a?.name ?? null, verified: !!a?.verified }; };
+  const lam = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+  const txs = (Array.isArray(res?.txs) ? res.txs : []).filter((t) => t && typeof t.tx === "string" && Array.isArray(t.accounts)).map((t) => ({
+    tx: t.tx, bytes: lam(t.bytes), lamports: lam(t.lamports), feeLamports: lam(t.feeLamports),
+    accounts: t.accounts.filter((a) => a && typeof a.address === "string" && B58RE.test(a.address) && typeof a.mint === "string" && B58RE.test(a.mint))
+      .map((a) => ({ address: a.address, ...named(a), action: a.action === "burn+close" ? "burn+close" : "close", lamports: lam(a.lamports), native: !!a.native })),
+  }));
+  const skipped = (Array.isArray(res?.skipped) ? res.skipped : []).filter((s) => s && typeof s.address === "string").map((s) => ({ address: s.address, reason: String(s.reason || "skipped").slice(0, 160) }));
+  rc.building = null;
+  rc.plan = { txs, skipped, owner, at: Date.now(), sent: false, burns: txs.reduce((s, t) => s + t.accounts.filter((a) => a.action !== "close").length, 0) };
+  setIdle();
+  renderCleanup(); renderBar();
+  setPose(sceneMascot("cleanup"), txs.length ? 19 : 4);
+  srSay(txs.length ? `Review ready: ${plural(txs.length, "transaction")}, one wallet prompt.${skipped.length ? ` ${skipped.length} skipped.` : ""}` : "Nothing could be closed. Reasons are listed.");
+}
+function rcCancelBuild() {
+  const rc = state.rc;
+  rc.building?.ctrl?.abort();
+  state.epoch++; rc.building = null; setIdle();
+  renderCleanup(); renderBar();
+  setPose(sceneMascot("cleanup"), 2);
+  toast({ title: "cleanup cancelled", body: "Nothing was signed or sent." });
+}
+function rcCinema(p) {
+  const n = p.txs.length, back = p.txs.reduce((s, t) => s + t.lamports, 0), accts = p.txs.reduce((s, t) => s + t.accounts.length, 0);
+  return { n, facts: `${state.wallet?.name || "Your wallet"} is asking you to approve ${plural(n, "transaction")} in one prompt. Check the balance changes it shows. Nothing is sent until you approve.`,
+    items: [
+      h("li", {}, icon("spark"), h("span", {}, "Coming in: ", h("b", {}, `${solApprox(back)} SOL`), ` from closing ${plural(accts, "account")}.`)),
+      p.burns > 0 && h("li", { class: "ask-warn" }, icon("flame", "i pink"), h("span", {}, h("b", {}, `${plural(p.burns, "token")} ${p.burns === 1 ? "leaves" : "leave"} for good. `), "Burned, not sold.")),
+      h("li", {}, icon("spark"), h("span", {}, "No fee. Duster never holds your funds or keys. Your wallet signs."))] };
+}
+async function approveReclaim() {
+  const rc = state.rc, p = rc.plan;
+  if (!p || !p.txs.length || state.busy || p.sent) return; // never signed twice once anything went out
+  if (state.pendingAccounts || p.owner !== state.account?.address || !liveAccountOk(p.owner)) return accountMoved();
+  // accounts can change while a review sits on screen (a token arrives, an account closes elsewhere)
+  if (Date.now() - p.at > RC_TTL_MS) return buildReclaim({ notice: "The review was a few minutes old, so every account was checked again. Look it over, then approve." });
+  const feature = state.wallet?.features?.["solana:signTransaction"];
+  if (!feature) { toast({ title: "this wallet can’t sign here", body: "Pick a wallet that supports Solana transaction signing.", tone: "bad" }); return; }
+  closeAllPops(); clearToasts();
+  const ep = state.epoch;
+  state.busy = "signing"; state.signing = "reclaim"; rc.notice = null;
+  $("#main").inert = true;
+  renderCleanup(); renderBar();
+  const unlock = () => { $("#main").inert = false; };
+  let fresh;
+  try {
+    fresh = await api("/api/refresh", { txs: p.txs.map((t) => t.tx) });
+    if (!Array.isArray(fresh?.txs) || fresh.txs.length !== p.txs.length) throw new ApiError("The server returned the wrong number of transactions.", 500);
+  } catch (e) {
+    if (ep !== state.epoch) return;
+    unlock(); setIdle(); renderCleanup(); renderBar();
+    if (e.status === 429) startCooldown(30);
+    toast({ title: "couldn’t prepare the transactions", body: `${e.message} Nothing was signed or sent.`, tone: "bad" });
+    return;
+  }
+  if (ep !== state.epoch) return;
+  const acct = state.wallet?.accounts?.find?.((a) => a.address === p.owner) || state.account;
+  if (state.pendingAccounts || p.owner !== state.account?.address || !liveAccountOk(p.owner)) { unlock(); setIdle(); return accountMoved(); }
+  showCinema(rcCinema(p));
+  let signed;
+  try {
+    const res = await feature.signTransaction(...fresh.txs.map((tx) => ({ account: acct, transaction: b64ToBytes(tx), chain: "solana:mainnet" })));
+    if (ep !== state.epoch) return; // the user stopped waiting: a late signature is dropped and never sent
+    if (!Array.isArray(res) || res.length !== p.txs.length) throw new Error("The wallet returned a different number of transactions than it was asked to sign.");
+    signed = res.map((r) => bytesToB64(r.signedTransaction));
+  } catch (e) {
+    if (ep !== state.epoch) return;
+    hideCinema(); setIdle(); renderCleanup(); renderBar();
+    toast(isReject(e)
+      ? { title: "cancelled in wallet. nothing was sent", body: "The review is still here. Approve again when you’re ready." }
+      : { title: "the wallet couldn’t sign", body: `${String(e?.message || e).slice(0, 160)} Nothing was sent.`, tone: "bad" });
+    setPose(sceneMascot("cleanup"), 4);
+    setTimeout(() => setPose(sceneMascot("cleanup"), 19, { hop: false }), 1600);
+    return;
+  }
+  p.sent = true;
+  hideCinema();
+  const want = fresh.txs.map(blockhashOf);
+  runReclaimSend(signed, fresh.lastValidBlockHeight, signed.map((s, i) => !!want[i] && blockhashOf(s) === want[i]));
+}
+async function runReclaimSend(signed, lastValid, keptHash = []) {
+  const ep = ++state.epoch, rc = state.rc, p = rc.plan;
+  const lv = Number.isFinite(lastValid) ? lastValid : null;
+  state.busy = "sending";
+  state.run = { kind: "reclaim", items: p.txs.map((t, i) => ({ ...t, i, status: "sending", sig: sigOf(signed[i]), note: null, lastValid: keptHash[i] ? lv : null, past: 0 })), done: false, sim: !!dev?.simulated };
+  await go("drop");
+  if (ep !== state.epoch) return;
+  $("#stampWrap").hidden = true; $("#result").hidden = true; $("#drop-title").classList.remove("as-stamp");
+  $("#drop-title").textContent = "sendin’ it";
+  $("#dropFacts").textContent = `${plural(p.txs.length, "transaction")} signed. Sending them now. Each one lands on its own, so a slow one never holds up the rest.`;
+  renderSimNote();
+  setPose(sceneMascot("drop"), 6, { mode: "wiggle" });
+  renderDrop(); renderBar();
+  const items = state.run.items;
+  if (!(await sendAndTrack(items, signed, ep, RC_COPY))) return;
+  state.run.done = true; setIdle();
+  rc.plan = null;
+  // what closed is gone right away (the refresh below confirms it), so "clean up more" counts only what's left
+  const gone = new Set(items.filter((t) => t.status === "confirmed").flatMap((t) => t.accounts.map((a) => a.address)));
+  if (rc.accounts) { rc.accounts = rc.accounts.filter((a) => !gone.has(a.address)); for (const a of gone) { rc.sel.delete(a); rc.burnSel.delete(a); } }
+  renderDrop(); renderResult(); renderBar();
+  srSay(`${items.filter((i) => i.status === "confirmed").length} of ${items.length} confirmed.`);
+  // what's left is picked afresh next time (a simulated run closed nothing, so its accounts come back picked too)
+  rc.resetSel = true;
+  if (!state.run.sim) loadAccounts({ silent: true });
+  // only burns change the pockets (closes empty accounts the token list never showed), so only they re-read it
+  const burnedOk = items.some((t) => t.status === "confirmed" && t.accounts.some((a) => a.action !== "close"));
+  if (burnedOk && !state.run.sim && state.rowsFor === state.account?.address) loadHoldings({ silent: true });
+}
+function rcPill(t) {
+  return t.status === "sending" ? h("span", { class: "pill" }, icon("bolt", "i"), "sending…")
+    : t.status === "confirming" ? h("span", { class: "pill" }, h("span", { class: "spin" }), t.processed ? "processed…" : "confirming…")
+    : t.status === "confirmed" ? h("span", { class: "pill ok" }, icon("check", "i"), "confirmed")
+    : t.status === "failed" ? h("span", { class: "pill bad" }, icon("x", "i"), "failed")
+    : t.status === "never" ? h("span", { class: "pill exp" }, "not sent")
+    : h("span", { class: "pill exp" }, "expired");
+}
+function renderReclaimDrop(r) {
+  $("#runList").replaceChildren(...r.items.map((t, i) => {
+    const sol = t.sig && !r.sim && h("a", { class: "sol-link", href: "https://solscan.io/tx/" + encodeURIComponent(t.sig), target: "_blank", rel: "noreferrer" }, "view on Solscan", icon("ext", "i"));
+    const right = h("div", { class: "tx-right" }, rcPill(t), (t.status === "confirmed" || t.status === "failed") && sol);
+    const note = t.note ? h("p", { class: "tx-note" + (t.status === "failed" ? " bad" : "") }, t.note) : null;
+    return rcTxLi(t, i, { right, note, gone: ["failed", "expired", "never"].includes(t.status), details: false });
+  }));
+}
+function renderReclaimResult() {
+  const r = state.run, items = r.items, ok = items.filter((i) => i.status === "confirmed"), bad = items.filter((i) => i.status !== "confirmed");
+  const back = ok.reduce((a, t) => a + t.lamports, 0), closed = ok.reduce((a, t) => a + t.accounts.length, 0), burned = ok.reduce((a, t) => a + t.accounts.filter((x) => x.action !== "close").length, 0);
+  const res = $("#result"); res.hidden = false;
+  const m = sceneMascot("drop"), title = $("#drop-title");
+  if (!bad.length) {
+    $("#dropFacts").textContent = `Every transaction landed. About ${solAmt(back)} SOL is back in your wallet from ${plural(closed, "closed account")}${burned ? `, with ${plural(burned, "dust token")} burned on the way` : ""}. No fee.`;
+    $("#stampWrap").hidden = false; title.classList.add("as-stamp"); title.textContent = "rent’s back: all aired out";
+    $("#stampText").textContent = "rent’s back"; $("#stamp").classList.add("long");
+    const st = $("#stamp"); st.classList.remove("slam"); void st.offsetWidth; if (!reduced()) st.classList.add("slam");
+    setPose(m, 5, { mode: "jump" });
+    feathers();
+  } else if (!ok.length) {
+    const allExp = bad.every((b) => b.status === "expired" || b.status === "never");
+    title.classList.remove("as-stamp"); title.textContent = allExp ? "it expired before landing" : "nothing closed";
+    $("#dropFacts").textContent = allExp ? "Solana transactions are only valid for about a minute, and these didn’t land in time. Nothing happened on-chain. Try again to get fresh ones." : "None of these went through. Nothing was closed or burned, and your accounts are as they were. Details are below each one.";
+    $("#stampWrap").hidden = true;
+    setPose(m, 1);
+  } else {
+    title.classList.remove("as-stamp"); title.textContent = "mostly aired out";
+    $("#dropFacts").textContent = `${plural(bad.length, "transaction")} didn’t go through, so ${bad.length === 1 ? "its accounts are" : "their accounts are"} still open. The other ${ok.length} landed: about ${solAmt(back)} SOL is back.`;
+    $("#stampWrap").hidden = true;
+    setPose(m, 4);
+  }
+  if (!ok.length) { fill(res, h("p", { class: "result-note" }, "Nothing was closed and no fee was taken. Your accounts haven’t changed.")); return; }
+  const backStat = h("div", { class: "stat received" }, h("p", { class: "overline" }, "rent back"), h("p", { class: "stat-v" }, h("span", { class: "odo-host" }), h("small", {}, "SOL")), h("p", { class: "stat-s" }, `${solUsd(back) ? `≈\u00a0${solUsd(back)} at today’s SOL price, ` : ""}from ${plural(closed, "closed account")}. Your wallet shows the exact amount.`));
+  fill(res,
+    h("div", { class: "stats" }, backStat,
+      h("div", { class: "stat" }, h("p", { class: "overline" }, "closed"), h("p", { class: "stat-v" }, String(closed), h("small", {}, closed === 1 ? "account" : "accounts")), h("p", { class: "stat-s" }, `in ${plural(ok.length, "transaction")}`)),
+      burned ? h("div", { class: "stat burned" }, h("p", { class: "overline pink" }, "burned"), h("p", { class: "stat-v" }, String(burned), h("small", {}, burned === 1 ? "token" : "tokens")), h("p", { class: "stat-s" }, "dust gone for good"))
+        : h("div", { class: "stat" }, h("p", { class: "overline" }, "fee"), h("p", { class: "stat-v" }, "0"), h("p", { class: "stat-s" }, "no fee on the cleanup"))),
+    h("div", { class: "result-actions" }, h("button", { class: "btn-ghost sm", type: "button", onclick: rcCopySummary }, icon("copy", "i i-sm"), "copy summary"), h("span", { id: "resRc", class: "res-rc" })),
+    bad.length > 0 && h("p", { class: "result-note" }, "“Try again” rebuilds just the accounts that are still open. The ones that closed are done. Failed transactions cost only the network fee; expired ones cost nothing."));
+  odometer(backStat.querySelector(".odo-host"), solAmt(back), backStat);
+  renderResultReclaim();
+}
+function renderReclaimDropBar(r, feeEl) {
+  const items = r.items, n = items.length, c = items.filter((i) => i.status === "confirmed").length;
+  $("#sumCount").textContent = `${c} of ${n} confirmed`;
+  feeEl.replaceChildren(h("span", {}, r.done ? (r.sim ? "simulated run · nothing was sent" : "no fee · your accounts are refreshing") : "keep this tab open until it’s done"));
+  if (!r.done) { caption("sent. waitin’ on the network…"); return setCta(`sending ${n}…`, { disabled: true, busy: true }); }
+  const failed = items.filter((i) => i.status !== "confirmed");
+  const more = rcEmptiesMine().length;
+  if (!failed.length) { caption(more ? "rent’s back. more pockets to air out" : "rent’s back. pockets aired out"); return setCta("back to your dust", { action: dustAgain, alt: more ? { label: "clean up more", run: () => openCleanup(), wide: true } : null }); }
+  const retry = () => rcRetry(failed);
+  if (!c) { caption(failed.every((f) => f.status === "expired" || f.status === "never") ? "it expired before landing" : "nothing closed this time"); return setCta("try again", { action: retry, alt: { label: "done", run: dustAgain } }); }
+  caption("mostly aired out");
+  return setCta(failed.length === 1 ? "try that one again" : `try the ${failed.length} again`, { action: retry, alt: { label: "done", run: dustAgain } });
+}
+// a retry is always a fresh read and a fresh build of what didn't close
+function rcRetry(failed) {
+  if (state.busy) return;
+  const addrs = failed.flatMap((t) => t.accounts.map((a) => a.address));
+  state.run = null;
+  openCleanup({ select: addrs });
+}
+async function rcCopySummary() {
+  const r = state.run, ok = r.items.filter((i) => i.status === "confirmed");
+  const back = ok.reduce((a, t) => a + t.lamports, 0), closed = ok.reduce((a, t) => a + t.accounts.length, 0);
+  const text = `duster cleanup: ${ok.length} of ${r.items.length} confirmed. ${solApprox(back)} SOL of rent back from ${plural(closed, "closed account")}, no fee.${r.sim ? " (dev simulation, nothing was sent)" : ""}\n` + ok.map((t) => `https://solscan.io/tx/${t.sig}`).join("\n");
+  try { await navigator.clipboard.writeText(text); toast({ title: "summary copied", tone: "ok", timeout: 2200 }); }
+  catch { toast({ title: "couldn’t copy", body: "Your browser blocked clipboard access." }); }
+}
+
 /* ================= copy buttons, mascot boops ================= */
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("[data-copy]"); if (!b) return;
@@ -2114,6 +3024,7 @@ const app = {
   state, go, renderBar, renderPockets, renderPocketsMeta, renderAside, renderCut, renderRing, syncRows, loadHoldings, loadConfig,
   openWallets, openPop, closePop, closeAllPops, clearToasts, toast, startPreview, approve, setOut, outs, burnOut, connect, disconnect,
   setPose, sceneMascot, hideCinema, placePopover, stopRing, startRing, autoSelect, keepMax, rowEls, registry, DEFAULT_OUTS, DEFAULT_SET, TTL_MS, MAX, setIdle,
+  rcFresh, openCleanup, loadAccounts, buildReclaim, approveReclaim, renderCleanup, syncCleanup, RC_MAX,
 };
 if (DEV_REQ) {
   try { dev = await (await import("/dev.js")).init(app, params); }

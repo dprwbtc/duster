@@ -4,8 +4,12 @@
 import { Connection, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
 import { JUP_RPS, getPrices, jupStats, searchTokens, type PriceInfo, type TokenMeta } from "./jupiter.js";
-import { getHoldings } from "./wallet.js";
+import { getHoldings, getTokenAccounts, parseTokenAccount, type TokenAccount } from "./wallet.js";
 import { feeApplies, planSwaps, type FeeConfig } from "./plan.js";
+import { readMeta } from "./meta.js";
+import { RpcUnavailable, tokenImage } from "./imgproxy.js";
+import { planReclaim, type ReclaimItem } from "./reclaim.js";
+import { TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 
 const SOL = "So11111111111111111111111111111111111111112";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -13,6 +17,8 @@ const USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const MAX_TOKENS_PER_PLAN = 30; // each token costs a Jupiter /build call plus simulations
 const MAX_TXS_PER_SEND = 30; // one transaction per token, so this matches MAX_TOKENS_PER_PLAN
 const MAX_TX_BYTES = 1232;
+const MAX_RECLAIM_ACCOUNTS = 400; // per /api/reclaim request; about 20 closes fit in one transaction
+const BURN_MAX_USD = 1; // "burn & close" is only for dust worth less than this (or with no price at all)
 
 class HttpError extends Error {
   constructor(public status: number, msg: string) {
@@ -375,4 +381,279 @@ export const status = wrap(async (req) => {
   // With h=1 the current block height comes along, so the UI can compare it with lastValidBlockHeight from
   // /api/refresh and say "expired" for certain. Without it, the original array shape is kept.
   return withHeight ? { statuses, blockHeight } : statuses;
+});
+
+/* ================= token images ================= */
+
+// Same-origin token images, so the visitor's browser never contacts a host the token's creator picked.
+// Binary response, so not wrap(): success is a small WebP the CDN can keep for a month; "no usable image" is a
+// 404 the CDN keeps for an hour (so a garbage mint can't make us re-fetch on every view); an image host that
+// rate-limited us or timed out is a 503 kept for five minutes; our own RPC failing or a rate limit is never cached.
+const IMG_HEADERS = { "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'" };
+const imgMiss = (status: number, cache: string) => new Response(null, { status, headers: { ...IMG_HEADERS, "Cache-Control": cache } });
+export async function img(req: Request): Promise<Response> {
+  try {
+    rateLimit(req, "img", 300); // a list scrolling into view asks for many at once; this only stops floods
+  } catch {
+    return imgMiss(429, "no-store");
+  }
+  // The page asks for /i/<mint> (a rewrite to here, see vercel.json) and nothing else. The CDN keys on the whole
+  // URL, so any extra query parameter would be a fresh cache miss (and a fresh RPC read and upstream fetch on a
+  // cold instance); those get a cacheable 400 instead. The mint may arrive in the path, the query, or both
+  // (depending on how the rewrite is presented), but never as two different values.
+  let mint: string;
+  try {
+    const url = new URL(req.url);
+    const fromPath = url.pathname.match(/^\/i\/([^/]+)$/)?.[1];
+    const keys = [...url.searchParams.keys()];
+    if (keys.some((k) => k !== "mint") || keys.length > 1) throw 0;
+    const fromQuery = url.searchParams.get("mint");
+    if (fromPath && fromQuery && fromPath !== fromQuery) throw 0;
+    mint = pubkey(fromPath ?? fromQuery, "mint").toBase58();
+    if (mint !== (fromPath ?? fromQuery)) throw 0; // one spelling per mint, one cache entry
+  } catch {
+    return imgMiss(400, "public, max-age=86400, s-maxage=86400");
+  }
+  try {
+    const { bytes, transient } = await tokenImage(env().connection, mint);
+    if (!bytes) return transient ? imgMiss(503, "public, max-age=60, s-maxage=300") : imgMiss(404, "public, max-age=3600, s-maxage=3600");
+    return new Response(new Uint8Array(bytes), {
+      headers: {
+        ...IMG_HEADERS,
+        "Content-Type": "image/webp",
+        "Content-Length": String(bytes.length),
+        "Cache-Control": "public, max-age=86400, s-maxage=2592000, stale-while-revalidate=604800",
+      },
+    });
+  } catch (e) {
+    if (!(e instanceof RpcUnavailable)) console.error(e);
+    return imgMiss(503, "no-store");
+  }
+}
+
+/* ================= the cleanup: rent reclaim ================= */
+
+// Prices only for accounts that still hold something, and only when burning is on the table (the burn section was
+// opened, or /api/reclaim was asked to burn). From memory when possible: a price from the last minute or two is
+// plenty to tell dust from value. Locally, where every handler shares one process, a recent /api/holdings read is
+// reused; on Vercel each api/*.ts is its own function with its own memory, so there it's one paced Jupiter /price
+// call per 50 mints, remembered for a minute on that instance.
+const PRICE_MEMO_MS = 60_000;
+const priceMemo = new Map<string, { at: number; usd: number | null }>();
+async function pricesFor(apiKey: string, owner: PublicKey, mints: string[]): Promise<Map<string, number | null>> {
+  const out = new Map<string, number | null>();
+  if (!mints.length) return out;
+  const hit = holdingsCache.get(owner.toBase58());
+  if (hit && Date.now() - hit.at < 120_000) {
+    try {
+      for (const r of await hit.rows) out.set(r.h.mint, r.price);
+    } catch {}
+  }
+  const now = Date.now();
+  const missing = mints.filter((m) => {
+    if (out.has(m)) return false;
+    const p = priceMemo.get(m);
+    if (p && now - p.at < PRICE_MEMO_MS) return out.set(m, p.usd), false;
+    return true;
+  });
+  if (missing.length) {
+    const got = await getPrices(apiKey, missing); // throws on failure: the caller must not treat that as "no price"
+    if (priceMemo.size > 5_000) priceMemo.clear();
+    for (const m of missing) {
+      const usd = got[m]?.usdPrice ?? null;
+      priceMemo.set(m, { at: now, usd });
+      out.set(m, usd);
+    }
+  }
+  return out;
+}
+
+/** Jupiter's names and verified flags, only when this owner's holdings are already in memory (no extra calls). */
+async function cachedJupMeta(owner: PublicKey) {
+  const out = new Map<string, { symbol: string | null; name: string | null; verified: boolean }>();
+  const hit = holdingsCache.get(owner.toBase58());
+  if (hit && Date.now() - hit.at < 120_000) {
+    try {
+      for (const r of await hit.rows) out.set(r.h.mint, { symbol: r.symbol, name: r.name, verified: r.verified });
+    } catch {}
+  }
+  return out;
+}
+
+/** Whether the owner can close this account, and if not, why (in the words the UI shows). */
+function closeCheck(a: TokenAccount, owner: string): { ok: true } | { ok: false; reason: string } {
+  if (a.owner !== owner) return { ok: false, reason: "not owned by this wallet" };
+  if (a.frozen) return { ok: false, reason: "frozen" };
+  if (a.closeAuthority && a.closeAuthority !== owner) return { ok: false, reason: "close authority is someone else" };
+  return { ok: true };
+}
+
+/**
+ * Why an account that still holds tokens may never be burned, whatever its price says, or null. Jupiter has no
+ * price for NFTs and SFTs (decimals 0), so "no price" there means "value unknown", not "worthless". The burn
+ * token is the project's own: it's never offered for burning here (the swaps' fee burns it on purpose).
+ */
+function burnBlock(a: TokenAccount): string | null {
+  if (a.native) return "wrapped SOL is closed (unwrapped), never burned";
+  if (a.decimals === 0) return "it looks like an NFT or collectible (no decimals), so it's never burned here";
+  const burnMint = process.env.BURN_TOKEN_MINT?.trim();
+  if (burnMint && a.mint === burnMint) return "that's the burn token; keep it or sell it instead";
+  return null;
+}
+
+export const accounts = wrap(async (req) => {
+  rateLimit(req, "accounts", 20);
+  const { apiKey, connection } = env();
+  const params = new URL(req.url).searchParams;
+  const owner = pubkey(params.get("owner"), "owner");
+  // Prices cost Jupiter quota (shared by everyone, 1 request/second on the Free plan), and they only matter for
+  // "burn & close". The empty-pockets card and the cleanup list ask without them (RPC only); the page asks again
+  // with prices=1 only when someone opens the burn section.
+  const withPrices = params.get("prices") === "1";
+  const ownerStr = owner.toBase58();
+  const list = await getTokenAccounts(connection, owner);
+  const program = new Map(list.map((a) => [a.mint, a.tokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? ("token-2022" as const) : ("token" as const)]));
+  const held = withPrices ? [...new Set(list.filter((a) => a.rawAmount > 0n && !burnBlock(a)).map((a) => a.mint))] : [];
+  let priceError = false;
+  const [prices, meta, jup] = await Promise.all([
+    pricesFor(apiKey, owner, held).catch((e) => (console.error(e), (priceError = true), new Map<string, number | null>())),
+    // names are nice to have; a slow or failing metadata read must not hide the accounts themselves
+    readMeta(connection, [...program.keys()], program).catch((e) => (console.error(e), new Map())),
+    cachedJupMeta(owner),
+  ]);
+  const rows = list.map((a) => {
+    const chk = closeCheck(a, ownerStr);
+    const empty = a.rawAmount === 0n;
+    // could be burned and closed, value permitting (the page shows the burn section only for these)
+    const burnCandidate = chk.ok && !empty && !burnBlock(a);
+    const price = withPrices && burnCandidate ? prices.get(a.mint) ?? null : null;
+    const usd = price === null ? null : a.uiAmount * price;
+    // Burning is irreversible, so it's offered only when we know the value: below $1, or no price anywhere.
+    // If prices weren't asked for, or the lookup itself failed, nothing is offered for burning.
+    const burnable = burnCandidate && withPrices && !priceError && (usd === null || usd < BURN_MAX_USD);
+    const j = jup.get(a.mint), m = meta.get(a.mint)?.meta;
+    return {
+      address: a.address.toBase58(),
+      mint: a.mint,
+      program: program.get(a.mint),
+      amount: a.rawAmount.toString(),
+      decimals: a.decimals,
+      uiAmount: a.uiAmount,
+      frozen: a.frozen,
+      native: a.native,
+      rentLamports: a.rentLamports,
+      lamports: a.lamports,
+      closeAuthority: a.closeAuthority,
+      // wrapped SOL can always be closed: closing just unwraps it into the wallet
+      closable: chk.ok && (empty || a.native),
+      reason: !chk.ok ? chk.reason : empty || a.native ? undefined : "has balance",
+      burnable,
+      burnCandidate,
+      // why a non-empty account isn't a burn candidate even though it could be closed (NFT, burn token)
+      burnBlock: chk.ok && !empty && !a.native ? burnBlock(a) ?? undefined : undefined,
+      withheld: a.withheld > 0n,
+      symbol: j?.symbol || m?.symbol || null,
+      name: j?.name || m?.name || null,
+      verified: !!j?.verified,
+      usd,
+    };
+  });
+  return { accounts: rows, priced: withPrices, priceError };
+});
+
+function addressList(v: unknown, what: string): string[] {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) throw new HttpError(400, `bad ${what} list`);
+  return [...new Set(v.map((x) => pubkey(x, "account").toBase58()))];
+}
+
+export const reclaim = wrap(async (req) => {
+  rateLimit(req, "reclaim", 20);
+  const b = await readJson(req);
+  const owner = pubkey(b.owner, "owner");
+  const ownerStr = owner.toBase58();
+  const close = addressList(b.close, "close");
+  const burn = addressList(b.burn, "burn");
+  if (!close.length && !burn.length) throw new HttpError(400, "pick at least one account");
+  if (close.some((a) => burn.includes(a))) throw new HttpError(400, "an account can't be both closed and burned");
+  if (close.length + burn.length > MAX_RECLAIM_ACCOUNTS) throw new HttpError(400, `pick at most ${MAX_RECLAIM_ACCOUNTS} accounts at a time`);
+  rateLimit(req, "reclaim-accounts", 2_000, close.length + burn.length);
+  const { apiKey, connection } = env();
+
+  // Re-read every account on the server; nothing about an account is taken from the browser.
+  const wanted = [...close.map((a) => ({ a, burn: false })), ...burn.map((a) => ({ a, burn: true }))];
+  const infos: Awaited<ReturnType<Connection["getMultipleParsedAccounts"]>>["value"] = [];
+  for (let i = 0; i < wanted.length; i += 100) {
+    const { value } = await connection.getMultipleParsedAccounts(wanted.slice(i, i + 100).map((w) => new PublicKey(w.a)));
+    infos.push(...value);
+  }
+  const skipped: { address: string; reason: string }[] = [];
+  const items: ReclaimItem[] = [];
+  const burnCandidates: { w: (typeof wanted)[number]; acct: TokenAccount }[] = [];
+  wanted.forEach((w, i) => {
+    const acct = parseTokenAccount(new PublicKey(w.a), infos[i] as any);
+    if (!acct) return skipped.push({ address: w.a, reason: "not a token account (already closed?)" });
+    const chk = closeCheck(acct, ownerStr);
+    if (!chk.ok) return skipped.push({ address: w.a, reason: chk.reason });
+    if (!w.burn) {
+      if (acct.rawAmount > 0n && !acct.native) return skipped.push({ address: w.a, reason: "it still holds tokens" });
+      return items.push({ acct, action: "close" });
+    }
+    if (acct.rawAmount === 0n) return items.push({ acct, action: "close" }); // nothing left to burn: a plain close
+    const block = burnBlock(acct);
+    if (block) return skipped.push({ address: w.a, reason: block });
+    burnCandidates.push({ w, acct });
+  });
+  if (burnCandidates.length) {
+    let prices: Map<string, number | null> | null = null;
+    try {
+      prices = await pricesFor(apiKey, owner, [...new Set(burnCandidates.map((c) => c.acct.mint))]);
+    } catch (e) {
+      console.error(e);
+    }
+    for (const { w, acct } of burnCandidates) {
+      if (!prices) { skipped.push({ address: w.a, reason: "couldn't check its price right now, so it wasn't burned" }); continue; }
+      const price = prices.get(acct.mint) ?? null;
+      const usd = price === null ? null : acct.uiAmount * price;
+      if (usd !== null && usd >= BURN_MAX_USD) { skipped.push({ address: w.a, reason: `worth about $${usd.toFixed(2)}, so it's not burned; sell it instead` }); continue; }
+      items.push({ acct, action: "burn+close" });
+    }
+  }
+
+  const t0 = Date.now();
+  const plan = items.length ? await planReclaim(connection, owner, items) : null;
+  skipped.push(...(plan?.skipped ?? []));
+  // Same per-send cap as the swaps: anything past it waits for the next run.
+  const batches = plan?.batches ?? [];
+  for (const extra of batches.splice(MAX_TXS_PER_SEND))
+    for (const it of extra.items) skipped.push({ address: it.acct.address.toBase58(), reason: `over the ${MAX_TXS_PER_SEND}-transaction limit for one prompt; reclaim it next run` });
+  console.log(JSON.stringify({ reclaim: { asked: wanted.length, txs: batches.length, skipped: skipped.length, ms: Date.now() - t0 } }));
+  return {
+    blockhash: plan?.blockhash ?? null,
+    lastValidBlockHeight: plan?.lastValidBlockHeight ?? null,
+    cuPrice: plan?.cuPrice ?? null,
+    skipped,
+    txs: batches.map((bt) => {
+      const bytes = bt.tx.serialize();
+      const accounts = bt.items.map(({ acct, action }) => ({
+        address: acct.address.toBase58(),
+        mint: acct.mint,
+        action,
+        rentLamports: acct.rentLamports,
+        // what lands in the wallet: the rent, plus the balance for wrapped SOL
+        lamports: acct.native ? acct.lamports : acct.rentLamports,
+        native: acct.native,
+        uiAmount: acct.uiAmount,
+      }));
+      return {
+        tx: Buffer.from(bytes).toString("base64"),
+        bytes: bytes.length,
+        accounts,
+        rentLamports: accounts.reduce((s, a) => s + a.rentLamports, 0),
+        lamports: accounts.reduce((s, a) => s + a.lamports, 0),
+        // base fee for one signature plus the priority fee at the simulated compute limit
+        feeLamports: 5_000 + Math.ceil((bt.cuLimit * (plan?.cuPrice ?? 0)) / 1_000_000),
+      };
+    }),
+  };
 });

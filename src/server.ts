@@ -21,6 +21,9 @@ const routes: Record<string, (req: Request) => Promise<Response>> = {
   "POST /api/refresh": h.refresh,
   "POST /api/send": h.send,
   "GET /api/status": h.status,
+  "GET /api/img": h.img,
+  "GET /api/accounts": h.accounts,
+  "POST /api/reclaim": h.reclaim,
 };
 
 async function toRequest(req: http.IncomingMessage): Promise<Request> {
@@ -39,9 +42,12 @@ http
   .createServer(async (req, res) => {
     for (const [k, v] of securityHeaders) if (k !== "Strict-Transport-Security") res.setHeader(k, v);
     const url = new URL(req.url ?? "/", "http://localhost");
-    const route = routes[`${req.method} ${url.pathname}`];
+    // /i/<mint> is the page's image URL; vercel.json rewrites it to /api/img (outside the /api firewall budget)
+    const route = routes[`${req.method} ${url.pathname}`] ?? (req.method === "GET" && /^\/i\/[^/]+$/.test(url.pathname) ? h.img : undefined);
     if (route) {
       const r = await route(await toRequest(req));
+      // handler headers win over the site-wide ones (the image proxy sends its own CSP and Content-Type);
+      // the body goes out as raw bytes, so binary responses (WebP from /api/img) pass through untouched
       r.headers.forEach((v, k) => res.setHeader(k, v));
       res.writeHead(r.status);
       return res.end(Buffer.from(await r.arrayBuffer()));

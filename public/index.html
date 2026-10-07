@@ -118,6 +118,7 @@
           <button class="btn-gold lg" id="heroConnect" type="button"><span>connect wallet</span><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button>
           <p class="helper">read-only until you approve something</p>
         </div>
+        <p class="hero-alt"><button class="btn-text sm" type="button" data-reclaim><span class="m-hide">no dust? just reclaim rent from empty token accounts</span><span class="m-show">no dust? reclaim rent</span><svg class="i i-sm" aria-hidden="true"><use href="#i-arrow"/></svg></button></p>
       </div>
 
       <div class="hero-stage">
@@ -157,6 +158,15 @@
           </div>
         </div>
 
+        <div class="liner-cleanup frame" id="linerCleanup">
+          <div>
+            <p class="overline green">the cleanup · no fee</p>
+            <h3 class="liner-h">your rent, back</h3>
+            <p>Every token account locks about 0.002 SOL of rent, even after it’s empty. Duster closes the empty ones and sends that SOL back to your wallet, about 25 accounts per transaction, all in one prompt. Duster adds no fee. Dust under $1 can be burned and closed too, but only if you pick it.</p>
+          </div>
+          <button class="btn-ghost" type="button" data-reclaim>just reclaim rent<svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+        </div>
+
         <div class="credits">
           <p><span>starring</span> <span>dusty</span></p>
           <p><span>routing</span> <span>Jupiter</span></p>
@@ -175,6 +185,7 @@
           <p class="overline">scene 01 · the pockets</p>
           <h2 class="scene-title" id="pk-title">pick your dust</h2>
           <p class="facts" id="pkFacts" aria-live="polite"></p>
+          <p class="pk-rentline" id="pkRentLine" hidden></p>
         </div>
         <button class="mascot mascot-cameo" type="button" data-mascot aria-label="Dusty the droid. Tap to say hi">
           <img width="254" height="334" alt="" decoding="async">
@@ -231,7 +242,35 @@
             </div>
             <button class="btn-ghost sm" type="button" id="setBtn" popovertarget="setPop"><svg class="i i-sm" aria-hidden="true"><use href="#i-gear"/></svg>edit</button>
           </div>
+          <!-- appears after the account read, below everything else, so nothing the user may be tapping moves -->
+          <div class="aside-block rent-card frame" id="rentCard" hidden></div>
         </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SC. 01 · THE CLEANUP (rent reclaim; its review is SC. 02 · the sweep) ===================== -->
+  <section class="scene" data-scene="cleanup" aria-labelledby="rc-title" hidden>
+    <div class="wrap">
+      <header class="scene-head">
+        <div class="sh-text">
+          <button class="back-link" type="button" id="rcBack"><svg class="i i-sm" aria-hidden="true"><use href="#i-back"/></svg>back to the pockets</button>
+          <p class="overline" id="rcOver">scene 01 · the cleanup</p>
+          <h2 class="scene-title" id="rc-title">empty pockets</h2>
+          <p class="facts" id="rcFacts" aria-live="polite"></p>
+        </div>
+        <button class="mascot mascot-cameo" type="button" data-mascot aria-label="Dusty the droid. Tap to say hi">
+          <img width="254" height="334" alt="" decoding="async">
+          <span class="bubble" aria-hidden="true">boop</span>
+        </button>
+      </header>
+
+      <div class="notice" id="rcNotice" role="status" hidden></div>
+      <div class="cut-hero rc-hero" id="rcHero" hidden></div>
+
+      <div class="cut-grid">
+        <div class="cut-main" id="rcMain"></div>
+        <aside class="cut-aside" id="rcAside" aria-label="About the cleanup"></aside>
       </div>
     </div>
   </section>
@@ -279,7 +318,7 @@
           <p class="overline" id="dropOver">scene 04 · the drop</p>
           <h2 class="scene-title" id="drop-title">sendin’ it</h2>
           <div class="stamp-wrap" id="stampWrap" hidden>
-            <p class="stamp" id="stamp" aria-hidden="true"><span class="script-gold">dusted</span>
+            <p class="stamp" id="stamp" aria-hidden="true"><span class="script-gold" id="stampText">dusted</span>
               <svg class="swash" viewBox="0 0 420 60" aria-hidden="true"><path d="M8 40c40-14 96-22 170-20 62 2 118 10 168 6 30-2 52-10 60-20-4 16-30 28-70 32-54 6-110-4-170-6-58-2-104 4-150 14" fill="none" stroke="url(#swashGrad)" stroke-width="3.2" stroke-linecap="round"/></svg>
             </p>
           </div>

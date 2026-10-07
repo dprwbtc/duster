@@ -19,12 +19,12 @@ import type { Holding } from "./wallet.js";
 
 const MAX_TX_BYTES = 1232;
 const MAX_ACCOUNT_LOCKS = 64; // the network rejects transactions that touch more accounts than this
-const CU_MAX = 1_400_000;
+export const CU_MAX = 1_400_000;
 const SET_COMPUTE_UNIT_PRICE = 3;
 // Priority fee bounds in micro-lamports per compute unit. Jupiter's estimate can be too low to land before the
 // blockhash expires; at ~300k CU the floor costs ~0.000015 SOL and the cap ~0.00009 SOL per transaction.
-const MIN_CU_PRICE = 50_000;
-const MAX_CU_PRICE = 300_000;
+export const MIN_CU_PRICE = 50_000;
+export const MAX_CU_PRICE = 300_000;
 
 export interface SwapLeg {
   holding: Holding;
@@ -143,7 +143,8 @@ function compile(
   return new VersionedTransaction(msg);
 }
 
-function fits(tx: VersionedTransaction): boolean {
+/** Whether a transaction is within the network's size (1232 bytes) and account-lock (64) limits. Shared with reclaim.ts. */
+export function fits(tx: VersionedTransaction): boolean {
   try {
     const m = tx.message;
     const loaded = m.addressTableLookups.reduce((n, l) => n + l.writableIndexes.length + l.readonlyIndexes.length, 0);
