@@ -29,7 +29,7 @@ export interface PriceInfo {
 async function get<T>(apiKey: string, path: string, params: Record<string, string>): Promise<T> {
   const url = `${BASE}${path}?${new URLSearchParams(params)}`;
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, { headers: { "x-api-key": apiKey } });
+    const res = await fetch(url, apiKey ? { headers: { "x-api-key": apiKey } } : {});
     if (res.status === 429 && attempt < 4) {
       await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
       continue;

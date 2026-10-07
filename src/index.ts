@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import readline from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { Connection, Keypair } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { getPrices } from "./jupiter.js";
 import { getHoldings } from "./wallet.js";
 import { planSwaps } from "./plan.js";
@@ -21,6 +21,9 @@ const { values: a } = parseArgs({
     exclude: { type: "string", default: "" }, // comma-separated mints to leave alone
     only: { type: "string", default: "" }, // comma-separated mints to swap exclusively
     "no-close": { type: "boolean", default: false }, // keep emptied token accounts
+    owner: { type: "string" }, // dry-run as this wallet (public address only, no keypair; can't --execute)
+    "fee-mint": { type: "string", default: process.env.BURN_TOKEN_MINT ?? "" }, // mirror the website's buy-and-burn fee
+    "fee-bps": { type: "string", default: process.env.FEE_BPS ?? "100" },
     execute: { type: "boolean", default: false }, // without this it's a dry run
     yes: { type: "boolean", default: false }, // skip confirmation prompt
     help: { type: "boolean", default: false },
@@ -29,16 +32,20 @@ const { values: a } = parseArgs({
 
 if (a.help) {
   console.log(`Usage: npm start -- [--to <mint>] [--max-usd 2] [--exclude m1,m2] [--execute]
-Dry-run by default: lists dust, builds and simulates transactions. Add --execute to send.`);
+Dry-run by default: lists dust, builds and simulates transactions. Add --execute to send.
+  --owner <address>   dry-run as any wallet (no keypair needed): plans and simulates exactly like the website
+  --fee-mint <mint>   include the website's buy-and-burn fee (defaults to $BURN_TOKEN_MINT), --fee-bps 100`);
   process.exit(0);
 }
 
 const need = (k: string) => process.env[k] ?? (console.error(`Missing env ${k} (see .env.example)`), process.exit(1));
-const apiKey = need("JUPITER_API_KEY");
+const apiKey = process.env.JUPITER_API_KEY ?? ""; // Jupiter allows low-volume keyless use
 const rpc = process.env.RPC_URL ?? "https://api.mainnet-beta.solana.com";
-const keypairPath = need("KEYPAIR_PATH").replace(/^~/, os.homedir());
-const payer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(keypairPath, "utf8"))));
+if (a.owner && a.execute) (console.error("--owner is dry-run only; use KEYPAIR_PATH to execute"), process.exit(1));
+const payer = a.owner ? null : Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(need("KEYPAIR_PATH").replace(/^~/, os.homedir()), "utf8"))));
+const ownerKey = payer?.publicKey ?? new PublicKey(a.owner!);
 const connection = new Connection(rpc, "confirmed");
+const fee = a["fee-mint"] ? { bps: Number(a["fee-bps"]), burnMint: new PublicKey(a["fee-mint"]).toBase58(), slippageBps: 300 } : null;
 
 const maxUsd = Number(a["max-usd"]);
 const minUsd = Number(a["min-usd"]);
@@ -49,10 +56,11 @@ const exclude = new Set(a.exclude!.split(",").filter(Boolean));
 const only = new Set(a.only!.split(",").filter(Boolean));
 const skipped: { mint: string; reason: string }[] = [];
 
-console.log(`Wallet ${payer.publicKey.toBase58()}  →  ${outMint}  (${a.execute ? "LIVE" : "dry run"})`);
+console.log(`Wallet ${ownerKey.toBase58()}  →  ${outMint}  (${a.execute ? "LIVE" : "dry run"})${fee ? `  fee ${fee.bps} bps buys & burns ${fee.burnMint}` : ""}`);
 
 // 1. Find dust: priced tokens worth between min-usd and max-usd.
-const holdings = (await getHoldings(connection, payer.publicKey)).filter((h) => h.mint !== outMint && h.mint !== SOL);
+// The burn token is never sold for the fee (the website hides it too).
+const holdings = (await getHoldings(connection, ownerKey)).filter((h) => h.mint !== outMint && h.mint !== SOL && h.mint !== fee?.burnMint);
 const prices = await getPrices(apiKey, [...new Set([...holdings.map((h) => h.mint), outMint])]);
 const outInfo = prices[outMint];
 if (!outInfo) throw new Error("No price for output token; can't sanity-check swaps");
@@ -75,7 +83,7 @@ for (const c of candidates) console.log(`  ${c.h.mint}  ${c.h.uiAmount}  ≈ $${
 const { batches, skipped: planSkipped } = await planSwaps({
   connection,
   apiKey,
-  owner: payer.publicKey,
+  owner: ownerKey,
   outMint,
   outInfo,
   items: candidates,
@@ -83,19 +91,21 @@ const { batches, skipped: planSkipped } = await planSwaps({
   maxAccounts: Number(a["max-accounts"]),
   maxLoss,
   closeSource,
+  fee,
 });
 skipped.push(...planSkipped);
 
 console.log(`\nPlan: ${batches.length} transaction(s)`);
 batches.forEach((b, i) => {
   const usd = b.legs.reduce((s, l) => s + l.usdIn, 0);
-  console.log(`  tx ${i + 1}: ${b.legs.length} swaps, ≈ $${usd.toFixed(2)}, ${b.tx.serialize().length} bytes`);
+  const f = b.fee ? `, fee ${b.fee.amountIn} -> burns ≥ ${Number(b.fee.burn.amount) / 10 ** b.fee.burn.decimals}` : "";
+  console.log(`  tx ${i + 1}: ${b.legs.map((l) => l.holding.mint.slice(0, 6)).join(",")} ≈ $${usd.toFixed(2)}, ${b.tx.serialize().length} bytes${f}`);
 });
 if (skipped.length) {
   console.log("\nSkipped:");
   for (const s of skipped) console.log(`  ${s.mint}: ${s.reason}`);
 }
-if (!batches.length) process.exit(0);
+if (!batches.length || !payer) process.exit(0);
 if (!a.execute) {
   console.log("\nDry run only (all transactions simulated OK). Re-run with --execute to send.");
   process.exit(0);

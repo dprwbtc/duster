@@ -28,8 +28,9 @@ function feeConfig(): FeeConfig | null {
 }
 
 function env() {
-  const apiKey = process.env.JUPITER_API_KEY;
-  if (!apiKey) throw new Error("JUPITER_API_KEY is not set");
+  // Locally, Jupiter's keyless tier is enough to develop against; production needs a key for its rate limits.
+  const apiKey = process.env.JUPITER_API_KEY ?? "";
+  if (!apiKey && process.env.VERCEL) throw new Error("JUPITER_API_KEY is not set");
   const rpc = process.env.RPC_URL;
   // The public RPC rate-limits hard and blocks the token-account queries this app needs.
   if (!rpc && process.env.VERCEL) throw new Error("RPC_URL is not set");

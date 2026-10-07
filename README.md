@@ -14,6 +14,12 @@ npm start -- --to EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v --max-usd 5 --exc
 Flags: `--to`, `--max-usd`, `--min-usd`, `--slippage` (bps), `--max-loss-pct`, `--max-accounts`,
 `--exclude`, `--only`, `--no-close`, `--execute`, `--yes`.
 
+Dry-run any wallet exactly like the website does (public address only, nothing is signed):
+
+```bash
+npm start -- --owner <wallet address> --fee-mint DBFcomeF97mTgRoKvHj2YtdFdvFcrLP4pFTBEPpKpump --max-usd 5
+```
+
 Notes
 - One transaction per token, like the old BONKscooper. A Solana tx is limited to 1232 bytes and 64 accounts, so
   each swap first tries Jupiter's widest routes (`--max-accounts`, default 64, usually the best price) and only
