@@ -3,7 +3,7 @@
 // never return internal error details (RPC URLs can embed API keys).
 import { Connection, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { getPrices, jupStats, searchTokens, type TokenMeta } from "./jupiter.js";
+import { JUP_RPS, getPrices, jupStats, searchTokens, type PriceInfo, type TokenMeta } from "./jupiter.js";
 import { getHoldings } from "./wallet.js";
 import { feeApplies, planSwaps, type FeeConfig } from "./plan.js";
 
@@ -101,6 +101,17 @@ async function metaFor(apiKey: string, mints: string[]): Promise<Map<string, Tok
 // reads fresh (and refreshes this cache), so a retry after a send starts from current balances.
 const HOLDINGS_TTL_MS = 20_000;
 const holdingsCache = new Map<string, { at: number; rows: Promise<Awaited<ReturnType<typeof readHoldingsWithValue>>> }>();
+// The output token's price barely moves between the requests of one chunked preview; reuse it for 20s.
+const outPrices = new Map<string, { at: number; value: Promise<PriceInfo | undefined> }>();
+function outPriceFor(apiKey: string, mint: string) {
+  const hit = outPrices.get(mint);
+  if (hit && Date.now() - hit.at < 20_000) return hit.value;
+  const value = getPrices(apiKey, [mint]).then((p) => p[mint]);
+  outPrices.set(mint, { at: Date.now(), value });
+  value.then((v) => !v && outPrices.delete(mint), () => outPrices.delete(mint));
+  return value;
+}
+
 function holdingsWithValue(apiKey: string, connection: Connection, owner: PublicKey, { fresh = false } = {}) {
   const key = owner.toBase58();
   const now = Date.now();
@@ -148,7 +159,7 @@ export const config = wrap(async (req) => {
     .then((p) => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, v.usdPrice])))
     .catch(() => ((ok = false), {}));
   let body: unknown;
-  if (!burnMint) body = { fee: null, prices: await pricesP };
+  if (!burnMint) body = { fee: null, prices: await pricesP, jupRps: JUP_RPS };
   else {
     // The fee settings come from env, so a token-metadata outage must not hide them: the UI needs the burn
     // mint to keep that token out of the sell list.
@@ -164,6 +175,7 @@ export const config = wrap(async (req) => {
         burnToken: { id: burnMint, symbol: meta?.symbol ?? "BURN", name: meta?.name ?? "", icon: meta?.icon ?? null, verified: !!meta?.isVerified },
       },
       prices,
+      jupRps: JUP_RPS, // the UI plans chunks in parallel only when the Jupiter plan has room for it
     };
   }
   configMemo = { at: Date.now(), ttl: ok ? 60_000 : 10_000, body };
@@ -214,7 +226,7 @@ export const plan = wrap(async (req) => {
 
   // Re-read balances and prices server-side; never trust amounts from the browser.
   const rows = await holdingsWithValue(apiKey, connection, owner);
-  const outPrice = (await getPrices(apiKey, [outMint]))[outMint];
+  const outPrice = await outPriceFor(apiKey, outMint);
   if (!outPrice) throw new HttpError(400, "The token you're swapping into has no reliable price, so swaps can't be checked. Pick another.");
 
   const skipped: { mint: string; reason: string }[] = [];

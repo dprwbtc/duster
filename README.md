@@ -81,6 +81,10 @@ Layout: `public/` is the static site, `api/*.ts` are Vercel Functions, `src/` is
      endpoint rate-limits hard and blocks the token-account lookups this app needs.
    - `BURN_TOKEN_MINT` (optional): turns on the buy-and-burn fee (see below). Leave it unset for no fee.
    - `FEE_BPS` (optional, default `100` = 1%, max `500`).
+   - `JUPITER_RPS` (optional): requests per second your Jupiter plan allows (Free `1` (the default with a key),
+     Developer `10`, Launch `50`, Pro `150`). Calls are paced to it so previews don't stall on 429s, and at 3+ the
+     page plans several chunks in parallel. Each token costs about one Jupiter call (plus one fee quote per chunk),
+     so on the Free plan a 30-token preview takes about 40s; on Developer, a few seconds.
    These all stay server-side and are never sent to the browser.
 3. **Add a rate limit** so nobody can drain your Jupiter/RPC quota: Project → *Firewall* → *Add rule*:
    if Request Path starts with `/api`, rate limit to 60 requests per 60s per IP (a 30-token preview is 5

@@ -97,8 +97,10 @@ const DEFAULT_OUTS = [
   { id: USDT, symbol: "USDT", name: "Tether USD", verified: true },
 ];
 const MAX = 30;            // matches the server's per-plan and per-send limits
-const CHUNK = 6;           // tokens per /api/plan request, so progress is real and no request nears the 60s limit
-const TTL_MS = 45_000;     // quotes go stale as prices move (blockhashes are refreshed right before signing)
+const CHUNK = 8;           // tokens per /api/plan request, so progress is real and no request nears the 60s limit
+// How long a quote may be signed. Every swap carries its guaranteed minimum output, so an older quote can only fail
+// on-chain (cheaply, at preflight), never fill worse than the minimum; blockhashes are refreshed right before signing.
+const TTL_MS = 120_000;
 const DEFAULT_SET = { slip: 1, loss: 10, close: true };
 const PRESETS = [1, 2, 5, 10, 25, "all", "custom"];
 
@@ -660,6 +662,7 @@ async function loadConfig() {
       const c = await api("/api/config");
       state.fee = c.fee && c.fee.burnToken?.id ? c.fee : null;
       state.prices = c.prices && typeof c.prices === "object" ? c.prices : {};
+      state.jupRps = Number(c.jupRps) || 1;
       state.feeErr = false;
       break;
     } catch {
@@ -1407,38 +1410,51 @@ async function startPreview(mints, { notice = null, reuse = null } = {}) {
   const merged = { txs: [...kept], skipped: [], feeApplied: kept.length ? !!reuse.feeApplied : null, burnMint: kept.length ? reuse.burnMint : null, outPrice: kept.length ? reuse.outPrice : null };
   let failure = null;
   const todo = state.building.items.filter((it) => it.st === "queued");
-  for (let i = 0; i < todo.length; i += CHUNK) {
-    const chunk = todo.slice(i, i + CHUNK);
+  const chunks = [];
+  for (let i = 0; i < todo.length; i += CHUNK) chunks.push(todo.slice(i, i + CHUNK));
+  // Chunks share one Jupiter rate limit (per account), so they only run side by side when the plan has room.
+  const lanes = Math.max(1, Math.min(3, Math.floor((state.jupRps || 1) / 3)));
+  let next = 0;
+  const runChunk = async (chunk) => {
     chunk.forEach((it) => (it.st = "routing"));
     renderCut(); renderBar();
     const at = Date.now();
-    try {
-      const res = await api("/api/plan", {
-        owner, outMint: out.id, mints: chunk.map((c) => c.mint),
-        slippageBps: Math.round(set.slip * 100), maxLossPct: set.loss, closeAccounts: set.close,
-      }, { signal: ctrl.signal });
-      if (ep !== state.epoch) return;
-      merged.txs.push(...(res.txs || []).map((t) => ({ ...t, at })));
-      merged.skipped.push(...(res.skipped || []));
-      merged.feeApplied = merged.feeApplied || !!res.feeApplied;
-      merged.burnMint = res.burnMint || merged.burnMint;
-      if (typeof res.outPrice === "number") merged.outPrice = res.outPrice;
-      const ready = new Set((res.txs || []).flatMap((t) => (t.legs || []).map((l) => l.mint)));
-      const skipped = new Map((res.skipped || []).map((s) => [s.mint, s.reason]));
-      for (const it of chunk) {
-        if (ready.has(it.mint)) it.st = "ready";
-        else { it.st = "skipped"; if (!skipped.has(it.mint)) merged.skipped.push({ mint: it.mint, reason: "not included by the server" }); }
-      }
-    } catch (e) {
-      if (e.name === "AbortError" || ep !== state.epoch) return;
-      failure = e;
-      // everything not routed yet is listed as skipped with the reason, so a retry can pick it up
-      for (const it of todo.slice(i)) { it.st = "skipped"; merged.skipped.push({ mint: it.mint, reason: e.status === 429 ? "rate limited" : "preview failed: " + e.message }); }
-      if (e.status === 429) startCooldown(60);
-      break;
+    const res = await api("/api/plan", {
+      owner, outMint: out.id, mints: chunk.map((c) => c.mint),
+      slippageBps: Math.round(set.slip * 100), maxLossPct: set.loss, closeAccounts: set.close,
+    }, { signal: ctrl.signal });
+    if (ep !== state.epoch) return;
+    merged.txs.push(...(res.txs || []).map((t) => ({ ...t, at })));
+    merged.skipped.push(...(res.skipped || []));
+    merged.feeApplied = merged.feeApplied || !!res.feeApplied;
+    merged.burnMint = res.burnMint || merged.burnMint;
+    if (typeof res.outPrice === "number") merged.outPrice = res.outPrice;
+    const ready = new Set((res.txs || []).flatMap((t) => (t.legs || []).map((l) => l.mint)));
+    const skipped = new Map((res.skipped || []).map((s) => [s.mint, s.reason]));
+    for (const it of chunk) {
+      if (ready.has(it.mint)) it.st = "ready";
+      else { it.st = "skipped"; if (!skipped.has(it.mint)) merged.skipped.push({ mint: it.mint, reason: "not included by the server" }); }
     }
-    state.building.done = Math.min(list.length, keptMints.size + i + CHUNK);
+    state.building.done = Math.min(list.length, state.building.items.filter((it) => it.st === "ready" || it.st === "skipped").length);
     renderCut(); renderBar();
+  };
+  await Promise.all(Array.from({ length: Math.min(lanes, chunks.length) }, async () => {
+    while (!failure && next < chunks.length && ep === state.epoch) {
+      const chunk = chunks[next++];
+      try { await runChunk(chunk); }
+      catch (e) {
+        if (e.name === "AbortError" || ep !== state.epoch) return;
+        failure = failure || e;
+        if (e.status === 429) startCooldown(60);
+      }
+    }
+  }));
+  if (ep !== state.epoch) return;
+  if (failure) {
+    // everything not routed yet is listed as skipped with the reason, so a retry can pick it up
+    for (const it of todo) if (it.st === "queued" || it.st === "routing") {
+      it.st = "skipped"; merged.skipped.push({ mint: it.mint, reason: failure.status === 429 ? "rate limited" : "preview failed: " + failure.message });
+    }
   }
   if (ep !== state.epoch) return;
   const pos = new Map(list.map((m, i) => [m, i]));
@@ -1459,8 +1475,8 @@ async function startPreview(mints, { notice = null, reuse = null } = {}) {
 }
 const readyMints = (p) => p.txs.flatMap((t) => (t.legs || []).map((l) => l.mint));
 const retryableMints = (p) => p.skipped.filter((s) => humanSkip(s, p).fix === "retry").map((s) => s.mint);
-// quotes young enough to keep through a re-quote: at least 15 seconds of freshness left
-const youngTxs = (p) => ({ txs: p.txs.filter((t) => t.at && Date.now() - t.at < TTL_MS - 15_000), feeApplied: p.feeApplied, burnMint: p.burnMint, outPrice: p.outPrice });
+// quotes young enough to keep through a re-quote: at least half their signing window left
+const youngTxs = (p) => ({ txs: p.txs.filter((t) => t.at && Date.now() - t.at < TTL_MS / 2), feeApplied: p.feeApplied, burnMint: p.burnMint, outPrice: p.outPrice });
 const allRateLimited = (p) => !!p && !p.txs.length && p.skipped.length > 0 && p.skipped.every((s) => s.reason === "rate limited");
 // "refresh quotes": when only time went by, keep the young quotes and re-quote the rest; when settings,
 // the output or the account changed, everything is quoted again
