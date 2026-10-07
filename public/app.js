@@ -1520,8 +1520,9 @@ async function startPreview(mints, { notice = null, reuse = null } = {}) {
   const todo = state.building.items.filter((it) => it.st === "queued");
   const chunks = [];
   for (let i = 0; i < todo.length; i += CHUNK) chunks.push(todo.slice(i, i + CHUNK));
-  // Chunks share one Jupiter rate limit (per account), so they only run side by side when the plan has room.
-  const lanes = Math.max(1, Math.min(3, Math.floor((state.jupRps || 1) / 3)));
+  // Chunks share one Jupiter rate limit (per account), so they only run side by side when the plan has room; on a
+  // plan with plenty (Developer and up) a full preview's chunks all go at once.
+  const lanes = Math.max(1, Math.min(Math.ceil(MAX / CHUNK), Math.floor((state.jupRps || 1) / 3)));
   let next = 0;
   const runChunk = async (chunk) => {
     chunk.forEach((it) => (it.st = "routing"));

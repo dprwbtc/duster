@@ -1,6 +1,6 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, getMint } from "@solana/spl-token";
-import { JupiterError, getBuild, type BuildResponse, type PriceInfo } from "./jupiter.js";
+import { JUP_LANES, JupiterError, getBuild, type BuildResponse, type PriceInfo } from "./jupiter.js";
 import { NO_SOL, buildOne, fitsOne, type Batch, type FeeLeg, type SwapLeg } from "./pack.js";
 import type { Holding } from "./wallet.js";
 
@@ -181,9 +181,9 @@ export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; ski
   const widest = o.fee && feeApplies(o.fee, o.outMint) && o.outMint !== SOL_MINT ? 48 : 64;
   const caps = DUST_CAPS.filter((c) => c <= Math.min(o.maxAccounts, widest));
   if (!caps.length) caps.push(o.maxAccounts);
-  const pool = async <T>(items: T[], fn: (x: T) => Promise<unknown>) => {
+  const pool = async <T>(items: T[], width: number, fn: (x: T) => Promise<unknown>) => {
     const queue = [...items];
-    await Promise.all(Array.from({ length: 3 }, async () => { for (let x; (x = queue.shift()) !== undefined; ) await fn(x); }));
+    await Promise.all(Array.from({ length: width }, async () => { for (let x; (x = queue.shift()) !== undefined; ) await fn(x); }));
   };
 
   // Quote one dust swap at a given cap, or say why it can't be sold.
@@ -212,7 +212,8 @@ export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; ski
 
   // 1. Quote every swap at the widest cap (usually the best price).
   const quoted: { c: (typeof o.items)[number]; leg: SwapLeg }[] = [];
-  await pool(o.items, async (c) => {
+  // Jupiter calls only: as wide as the Jupiter plan allows.
+  await pool(o.items, JUP_LANES, async (c) => {
     const leg = await quoteDust(c, caps[0]);
     if (typeof leg === "string") skipped.push({ mint: c.h.mint, reason: leg });
     else quoted.push({ c, leg });
@@ -231,8 +232,9 @@ export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; ski
     }
   }
 
-  // 3. Fit each swap with its own buy-and-burn (tightening the route only if needed), then simulate.
-  await pool(quoted, async ({ c, leg: first }) => {
+  // 3. Fit each swap with its own buy-and-burn (tightening the route only if needed), then simulate. Mostly RPC
+  // simulations, so three at a time whatever the Jupiter plan: the RPC has its own limits.
+  await pool(quoted, 3, async ({ c, leg: first }) => {
     let leg: SwapLeg = first;
     for (let i = 0; i < caps.length; i++) {
       if (i > 0) {

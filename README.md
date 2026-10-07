@@ -257,9 +257,12 @@ Layout: `public/` is the static site, `api/*.ts` are Vercel Functions, `src/` is
    - `IPFS_GATEWAYS` (optional): comma-separated IPFS gateways `/api/img` fetches IPFS content from (each CID
      starts at a different one and falls back to the others).
    - `JUPITER_RPS` (optional): requests per second your Jupiter plan allows (Free `1` (the default with a key),
-     Developer `10`, Launch `50`, Pro `150`). Calls are paced to it so previews don't stall on 429s, and at 3+ the
-     page plans several chunks in parallel. Each token costs about one Jupiter call (plus one fee quote per chunk),
-     so on the Free plan a 30-token preview takes about 40s; on Developer, a few seconds.
+     Developer `10`, Launch `50`, Pro `150`). **Set it when you upgrade**: Duster can't see your plan, so without it
+     every call is paced to Free. Calls are paced to it so previews don't stall on 429s; at 3+ the page plans chunks
+     in parallel (at 12+ all four chunks of a 30-token preview at once), and at 10+ each chunk quotes up to 8 tokens
+     at a time (simulations stay 3 at a time for the RPC's sake) and price/metadata batches go out together. Each
+     token costs about one Jupiter call (plus one fee quote per chunk), so on the Free plan a 30-token preview takes
+     about 40s; on Developer and up, a few seconds. Set higher than the plan allows, it mostly costs 429 waits (a token still refused after six is "busy").
    These all stay server-side and are never sent to the browser.
 3. **Add two rate limits** so nobody can drain your Jupiter/RPC quota: Project → *Firewall* → *Add rule*:
    - if Request Path starts with `/api`, rate limit to 60 requests per 60s per IP (a 30-token preview is 4

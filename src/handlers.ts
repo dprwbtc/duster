@@ -102,11 +102,11 @@ function wrap(fn: (req: Request) => Promise<unknown>) {
 }
 
 async function metaFor(apiKey: string, mints: string[]): Promise<Map<string, TokenMeta>> {
-  const out = new Map<string, TokenMeta>();
-  for (let i = 0; i < mints.length; i += 100) {
-    for (const t of await searchTokens(apiKey, mints.slice(i, i + 100).join(","))) out.set(t.id, t);
-  }
-  return out;
+  const batches: string[] = [];
+  for (let i = 0; i < mints.length; i += 100) batches.push(mints.slice(i, i + 100).join(","));
+  // requested together; pace() spaces them to the Jupiter plan's rate
+  const got = await Promise.all(batches.map((q) => searchTokens(apiKey, q)));
+  return new Map(got.flat().map((t) => [t.id, t]));
 }
 
 // A chunked preview sends several /api/plan requests in a row for the same owner. Reusing one balance and
