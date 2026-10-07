@@ -48,6 +48,8 @@ export const jupStats = new AsyncLocalStorage<{ calls: number; r429: number; ms:
  * account over a 60s sliding window, so calls from one instance are spaced out to it instead of bursting into 429s.
  */
 export const JUP_RPS = Math.max(0.2, Number(process.env.JUPITER_RPS) || (process.env.JUPITER_API_KEY ? 1 : 0.5));
+/** How many Jupiter calls one request may have in flight: wide enough to use a paid plan's rate, never a burst on Free. */
+export const JUP_LANES = JUP_RPS >= 10 ? 8 : 3;
 let nextSlot = 0;
 async function pace() {
   const now = Date.now();
@@ -106,14 +108,12 @@ async function get<T>(apiKey: string, path: string, params: Record<string, strin
   }
 }
 
-/** USD prices for up to N mints (batched by 50). Mints without a reliable price are omitted. */
+/** USD prices for up to N mints (batched by 50, requested together; pace() spaces them to the plan). Mints without a reliable price are omitted. */
 export async function getPrices(apiKey: string, mints: string[]): Promise<Record<string, PriceInfo>> {
-  const out: Record<string, PriceInfo> = {};
-  for (let i = 0; i < mints.length; i += 50) {
-    const chunk = mints.slice(i, i + 50);
-    Object.assign(out, await get(apiKey, "/price/v3", { ids: chunk.join(",") }));
-  }
-  return out;
+  const batches: string[][] = [];
+  for (let i = 0; i < mints.length; i += 50) batches.push(mints.slice(i, i + 50));
+  const got = await Promise.all(batches.map((b) => get<Record<string, PriceInfo>>(apiKey, "/price/v3", { ids: b.join(",") })));
+  return Object.assign({}, ...got);
 }
 
 /** Raw swap instructions (Router / Metis) so several swaps can be composed into one transaction. */
