@@ -13,8 +13,10 @@ export interface Holding {
 
 export async function getHoldings(connection: Connection, owner: PublicKey): Promise<Holding[]> {
   const out: Holding[] = [];
-  for (const programId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
-    const { value } = await connection.getParsedTokenAccountsByOwner(owner, { programId });
+  const programs = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID];
+  const reads = await Promise.all(programs.map((programId) => connection.getParsedTokenAccountsByOwner(owner, { programId })));
+  for (const [i, { value }] of reads.entries()) {
+    const programId = programs[i];
     for (const { pubkey, account } of value) {
       const info = account.data.parsed.info;
       const rawAmount = BigInt(info.tokenAmount.amount);

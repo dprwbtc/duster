@@ -3,9 +3,10 @@
 // never return internal error details (RPC URLs can embed API keys).
 import { Connection, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { JUP_RPS, getPrices, jupStats, searchTokens, type PriceInfo, type TokenMeta } from "./jupiter.js";
+import { JUP_RPS, JupiterError, getPrices, jupStats, searchTokens, type PriceInfo, type TokenMeta } from "./jupiter.js";
 import { getHoldings, getTokenAccounts, parseTokenAccount, type TokenAccount } from "./wallet.js";
 import { feeApplies, planSwaps, type FeeConfig } from "./plan.js";
+import { NO_SOL } from "./pack.js";
 import { readMeta } from "./meta.js";
 import { classifyMints, hintsFrom, isNftKind, kindCounts, type MintClass, type NftKind } from "./nft.js";
 import { RpcUnavailable, tokenImage } from "./imgproxy.js";
@@ -93,6 +94,8 @@ function wrap(fn: (req: Request) => Promise<unknown>) {
     } catch (e) {
       if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
       console.error(e);
+      // Jupiter being slow or rate-limited is momentary and says nothing about the wallet: tell the user to retry.
+      if (e instanceof JupiterError && e.busy) return Response.json({ error: "Prices and quotes are busy right now. Try again in a moment." }, { status: 503 });
       return Response.json({ error: "Something went wrong on the server. Please try again." }, { status: 500 });
     }
   };
@@ -293,7 +296,7 @@ export const plan = wrap(async (req) => {
     else items.push({ h: r.h, usd: r.usd });
   }
 
-  const stats = { calls: 0, r429: 0, ms: 0, build: 0, buildMs: 0 };
+  const stats = { calls: 0, r429: 0, ms: 0, build: 0, buildMs: 0, err: 0 };
   const t0 = Date.now();
   const result = await jupStats.run(stats, () => planSwaps({
     connection,
@@ -309,20 +312,18 @@ export const plan = wrap(async (req) => {
     fee,
   }));
   console.log(JSON.stringify({ plan: { tokens: items.length, txs: result.batches.length, skipped: result.skipped.length, ms: Date.now() - t0, out: outMint.slice(0, 4), jup: stats } }));
-  // Jupiter/RPC error text can be noisy or leak details; keep reasons short and generic.
-  // A Jupiter rate limit is not "no market": say so, so the UI can offer a retry instead of giving up.
-  skipped.push(
-    ...result.skipped.map((s) => ({
-      mint: s.mint,
-      reason: s.reason.startsWith("no route") ? (/\b429\b/.test(s.reason) ? "quote service busy; try again shortly" : "no route found") : s.reason,
-    })),
-  );
+  // Jupiter/RPC error text can be noisy or leak details; keep reasons short and generic. (A busy Jupiter is
+  // already reported as "quote service busy" by the planner, so the UI offers a retry instead of giving up.)
+  skipped.push(...result.skipped.map((s) => ({ mint: s.mint, reason: s.reason.startsWith("no route") ? "no route found" : s.reason })));
   const feeApplied = feeApplies(fee, outMint);
+  // When swaps were skipped for lack of SOL, say how much the wallet has, so the page can say what's missing.
+  const solLamports = skipped.some((s) => s.reason === NO_SOL) ? await connection.getBalance(owner).catch(() => null) : null;
   return {
     skipped,
     feeApplied,
     burnMint: feeApplied ? fee.burnMint : null,
     outPrice: outPrice.usdPrice,
+    ...(solLamports !== null ? { solLamports } : {}),
     txs: result.batches.map((bt) => {
       const bytes = bt.tx.serialize();
       return {

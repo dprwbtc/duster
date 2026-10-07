@@ -28,6 +28,13 @@ Notes
 - Emptied source token accounts are closed to reclaim rent unless `--no-close`.
 - Each tx is simulated; a token that fails is skipped without blocking the rest. If an emptied account can't be
   closed (e.g. Token-2022 with withheld transfer fees), the swap goes ahead and the account is kept.
+- A swap needs a little SOL on hand while it runs: about 0.002 SOL of rent for each account it opens (the wrapped-SOL
+  account is closed again in the same transaction; a first-time token account stays) plus the network fee. When the
+  simulation runs out of lamports the token is skipped as `not enough SOL` (no re-quote is spent on it). On the
+  website, a preview where that's what stopped it leads to the cleanup, whose rent is usually the missing SOL.
+- Every Jupiter call times out after 8s. A timeout, network error or 5xx is retried once; a 429 waits for
+  `x-ratelimit-reset`. If Jupiter still can't answer, the token is skipped as `quote service busy` (never "no
+  route"), and other endpoints answer 503 "try again". Failures log Jupiter's `x-api-gateway-request-id`.
 
 ## Web UI (local)
 
@@ -38,10 +45,10 @@ npm run web      # then open http://localhost:3000
 Needs only `JUPITER_API_KEY` (and ideally `RPC_URL`). No private key: users connect Phantom, Solflare or
 Backpack and sign in their wallet. The local server runs the same handlers and security headers as Vercel.
 
-The UI is plain HTML/CSS/JS in `public/` (no build step). It previews in chunks of 6 tokens, one `/api/plan`
-request after another, so progress is real and no single request nears the 60s function limit. The quote
-freshness timer counts from the oldest chunk; once the oldest quote is older than 45s the plan is refreshed before
-signing (young quotes are kept, stale ones re-quoted). `/api/refresh` stamps a fresh blockhash right before the
+The UI is plain HTML/CSS/JS in `public/` (no build step). It previews in chunks of 8 tokens, one `/api/plan`
+request after another (side by side when `JUPITER_RPS` is 3 or more), so progress is real and no single request
+nears the 60s function limit. The quote freshness timer counts from the oldest chunk; once the oldest quote is older
+than 120s the plan is refreshed before signing (quotes under 60s old are kept, older ones re-quoted). `/api/refresh` stamps a fresh blockhash right before the
 wallet prompt, and a plan is never signed again once any of its transactions went out (a retry is a fresh preview
 of what didn't land). If the wallet never answers, the user can stop waiting; a late signature is dropped, never
 sent. Token images always come from Duster's own origin (`/i/<mint>`, served by `/api/img`, below), never from the
@@ -51,7 +58,7 @@ host a token's creator picked, so an airdropped token's image host can't see who
 
 - `http://localhost:3000/?demo`: everything from fixtures, plus a "dev · states" popover that jumps to any
   scene (landing, loading, list, empty, errors, building, review, expired quotes, wallet prompt, sending, success,
-  partial failure, expired, 30+ tokens, into $LILVADER, …) and every cleanup state (list, nothing to close,
+  partial failure, expired, 30+ tokens, short on SOL, into $LILVADER, …) and every cleanup state (list, nothing to close,
   loading, error, building, review, review with burns, burn section open, can't close any, big wallet, success,
   partial, empty wallet with rent, only NFTs, NFTs + collectibles + unchecked, only collectibles, NFT collector,
   only held NFTs, game wallet). The fixtures include NFT and collectible holdings, a priced 0-decimal coin, a mint
@@ -64,8 +71,9 @@ host a token's creator picked, so an airdropped token's image host can't see who
 
 API additions the UI uses (all backward-compatible): `/api/config` also returns `prices` (USD price of the
 default outputs and the burn token, for estimates only); `/api/tokens/search` results include `usdPrice`;
-`/api/plan` returns `outPrice`, `burnMint`, and per leg `minOut` (guaranteed minimum before the fee), and a
-Jupiter rate limit is reported as `quote service busy` instead of `no route found`;
+`/api/plan` returns `outPrice`, `burnMint`, and per leg `minOut` (guaranteed minimum before the fee), a busy
+Jupiter (rate limit, server error or timeout) is reported as `quote service busy` instead of `no route found`, and
+when a token was skipped as `not enough SOL` it adds `solLamports` (the wallet's SOL balance);
 `/api/status?h=1` returns `{ statuses, blockHeight }` (height read first) so the UI can declare a transaction
 expired once the chain passes the `lastValidBlockHeight` from `/api/refresh` (it asks twice before saying so);
 `/api/send` marks an uncertain relay error with `uncertain: true` so the UI keeps tracking that signature.
@@ -254,7 +262,7 @@ Layout: `public/` is the static site, `api/*.ts` are Vercel Functions, `src/` is
      so on the Free plan a 30-token preview takes about 40s; on Developer, a few seconds.
    These all stay server-side and are never sent to the browser.
 3. **Add two rate limits** so nobody can drain your Jupiter/RPC quota: Project → *Firewall* → *Add rule*:
-   - if Request Path starts with `/api`, rate limit to 60 requests per 60s per IP (a 30-token preview is 5
+   - if Request Path starts with `/api`, rate limit to 60 requests per 60s per IP (a 30-token preview is 4
      `/api/plan` requests, and confirming polls `/api/status` every 2s);
    - if Request Path starts with `/i/`, rate limit to 600 requests per 60s per IP. Token pictures are `/i/<mint>`,
      and one long list asks for dozens of them; the firewall counts requests before the CDN cache, so keeping them
@@ -304,7 +312,7 @@ reducing the token's supply. Any extra from positive slippage stays with the use
   reliable price and routes that lose more than the user's limit (capped at 50%). Slippage is capped at 20%.
 - NFTs and collectibles are classified on-chain and never sold or burned, whatever the browser asks for (fail
   closed when unsure).
-- Every transaction is simulated before it's offered for signing. A plan older than 45s is rebuilt before
+- Every transaction is simulated before it's offered for signing. A plan older than 120s is rebuilt before
   signing, and transactions get a fresh blockhash right before the wallet prompt so they don't expire.
 - Strict Content-Security-Policy (scripts only from this site), `frame-ancestors 'none'` against
   clickjacking. Token names are rendered as text, never HTML.
