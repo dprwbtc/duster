@@ -216,24 +216,47 @@ export const plan = wrap(async (req) => {
   };
 });
 
-export const send = wrap(async (req) => {
-  rateLimit(req, "send", 10);
-  const b = await readJson(req);
+/** Parse a request's base64 transactions, enforcing count and size caps. */
+function readTxs(b: any): { raw: Buffer; tx: VersionedTransaction }[] {
   if (!Array.isArray(b.txs) || b.txs.length === 0 || b.txs.length > MAX_TXS_PER_SEND) throw new HttpError(400, "bad transactions");
-  // Only relay well-formed, fully signed transactions so this can't be used as a generic spam relay.
-  const raws = b.txs.map((t: unknown) => {
+  return b.txs.map((t: unknown) => {
     if (typeof t !== "string" || t.length > 2000) throw new HttpError(400, "bad transaction");
     const raw = Buffer.from(t, "base64");
     if (raw.length > MAX_TX_BYTES) throw new HttpError(400, "transaction too large");
-    let tx: VersionedTransaction;
     try {
-      tx = VersionedTransaction.deserialize(raw);
+      return { raw, tx: VersionedTransaction.deserialize(raw) };
     } catch {
       throw new HttpError(400, "bad transaction");
     }
-    if (tx.signatures.some((s) => s.every((byte) => byte === 0))) throw new HttpError(400, "transaction is not signed");
-    return raw;
   });
+}
+
+/**
+ * Re-stamp unsigned transactions with a fresh blockhash right before the wallet prompt. A transaction is only
+ * valid for ~60s after its blockhash, and previewing, reviewing and approving can easily take longer than that.
+ */
+export const refresh = wrap(async (req) => {
+  rateLimit(req, "refresh", 20);
+  const txs = readTxs(await readJson(req));
+  // Only unsigned ones: changing the blockhash would invalidate any signature anyway.
+  if (txs.some(({ tx }) => tx.signatures.some((sig) => sig.some((byte) => byte !== 0)))) throw new HttpError(400, "transaction is already signed");
+  const { connection } = env();
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  return {
+    lastValidBlockHeight,
+    txs: txs.map(({ tx }) => {
+      tx.message.recentBlockhash = blockhash;
+      return Buffer.from(tx.serialize()).toString("base64");
+    }),
+  };
+});
+
+export const send = wrap(async (req) => {
+  rateLimit(req, "send", 10);
+  // Only relay well-formed, fully signed transactions so this can't be used as a generic spam relay.
+  const txs = readTxs(await readJson(req));
+  if (txs.some(({ tx }) => tx.signatures.some((sig) => sig.every((byte) => byte === 0)))) throw new HttpError(400, "transaction is not signed");
+  const raws = txs.map(({ raw }) => raw);
   const { connection } = env();
   // Each transaction stands alone (its own swap and buy-and-burn), so they can go out together.
   const sigs = await Promise.all(

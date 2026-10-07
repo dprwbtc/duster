@@ -84,7 +84,7 @@ reducing the token's supply. Any extra from positive slippage stays with the use
 - The server re-reads balances and prices itself and ignores amounts sent by the browser. It skips tokens with no
   reliable price and routes that lose more than the user's limit (capped at 50%). Slippage is capped at 20%.
 - Every transaction is simulated before it's offered for signing. A plan older than 45s is rebuilt before
-  signing.
+  signing, and transactions get a fresh blockhash right before the wallet prompt so they don't expire.
 - Strict Content-Security-Policy (scripts only from this site), `frame-ancestors 'none'` against
   clickjacking. Token names are rendered as text, never HTML.
 - Input validation and size caps on every endpoint (30 tokens per plan, 30 transactions per send). `/api/send`

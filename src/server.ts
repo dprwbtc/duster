@@ -18,6 +18,7 @@ const routes: Record<string, (req: Request) => Promise<Response>> = {
   "GET /api/holdings": h.holdings,
   "GET /api/tokens/search": h.tokenSearch,
   "POST /api/plan": h.plan,
+  "POST /api/refresh": h.refresh,
   "POST /api/send": h.send,
   "GET /api/status": h.status,
 };

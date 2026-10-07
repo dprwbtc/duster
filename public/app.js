@@ -6,7 +6,7 @@ const DEFAULTS = [
 ];
 const $ = (id) => document.getElementById(id);
 const MAX_TOKENS = 30; // matches the server limit per preview
-const PLAN_TTL_MS = 45_000; // blockhashes expire after ~60-90s
+const PLAN_TTL_MS = 45_000; // quotes go stale as prices move (blockhashes are refreshed at signing)
 const state = { fee: undefined, wallets: [], wallet: null, account: null, rows: [], selected: new Set(), out: DEFAULTS[1], touched: false, plan: null };
 
 // Build DOM without innerHTML: token names/symbols are attacker-controlled.
@@ -212,11 +212,14 @@ async function signAndSend() {
     $("plan").prepend(h("div", { class: "notice warn", style: "margin:0 0 10px" }, "Prices move, so the preview was refreshed. Check it again, then sign."));
     return;
   }
-  const btn = $("sign"); btn.disabled = true; btn.textContent = "Waiting for wallet…";
+  const btn = $("sign"); btn.disabled = true; btn.textContent = "Preparing…";
   const setStatus = (i, text, cls) => { const el = $("status-" + i); if (el) { el.replaceChildren(text); el.style.color = cls ? `var(--${cls})` : ""; } };
   try {
+    // A transaction is only valid for ~60s after its blockhash, so stamp a fresh one right before the wallet prompt.
+    const fresh = await api("/api/refresh", { txs: state.plan.txs.map((t) => t.tx) });
+    btn.textContent = "Waiting for wallet…";
     const signed = await state.wallet.features["solana:signTransaction"].signTransaction(
-      ...state.plan.txs.map((t) => ({ account: state.account, transaction: b64ToBytes(t.tx), chain: "solana:mainnet" })));
+      ...fresh.txs.map((tx) => ({ account: state.account, transaction: b64ToBytes(tx), chain: "solana:mainnet" })));
     btn.textContent = "Sending…";
     const sigs = await api("/api/send", { txs: signed.map((s) => bytesToB64(s.signedTransaction)) });
     const pending = new Map();
@@ -233,7 +236,7 @@ async function signAndSend() {
         else if (s.status === "confirmed" || s.status === "finalized") { setStatus(i, ["Confirmed · ", link], "ok"); pending.delete(i); }
       });
     }
-    if (pending.size) for (const i of pending.keys()) setStatus(i, "Not confirmed yet. Check your wallet history before retrying.", "warn");
+    if (pending.size) for (const i of pending.keys()) setStatus(i, "Didn't confirm in time, so it most likely expired without doing anything. Check your wallet history, then preview again.", "warn");
     btn.textContent = "Done";
     await loadHoldings(true);
   } catch (e) {

@@ -21,6 +21,10 @@ const MAX_TX_BYTES = 1232;
 const MAX_ACCOUNT_LOCKS = 64; // the network rejects transactions that touch more accounts than this
 const CU_MAX = 1_400_000;
 const SET_COMPUTE_UNIT_PRICE = 3;
+// Priority fee bounds in micro-lamports per compute unit. Jupiter's estimate can be too low to land before the
+// blockhash expires; at ~300k CU the floor costs ~0.000015 SOL and the cap ~0.00009 SOL per transaction.
+const MIN_CU_PRICE = 50_000;
+const MAX_CU_PRICE = 300_000;
 
 export interface SwapLeg {
   holding: Holding;
@@ -120,8 +124,14 @@ function compile(
     const b = fee.burn;
     if (b.amount > 0n) body.push(createBurnCheckedInstruction(b.account, b.mint, payer, b.amount, b.decimals, [], b.tokenProgram));
   }
-  // Keep Jupiter's priority-fee instruction (from the first leg) but set our own CU limit.
-  const price = legs[0].build.computeBudgetInstructions.filter((i) => Buffer.from(i.data, "base64")[0] === SET_COMPUTE_UNIT_PRICE).map(toIx);
+  // Use Jupiter's priority-fee estimate within our bounds, and set our own CU limit.
+  let microLamports = MIN_CU_PRICE;
+  for (const b of [...legs.map((l) => l.build), ...(fee ? [fee.build] : [])])
+    for (const i of b.computeBudgetInstructions) {
+      const d = Buffer.from(i.data, "base64");
+      if (d[0] === SET_COMPUTE_UNIT_PRICE && d.length >= 9) microLamports = Math.max(microLamports, Number(d.readBigUInt64LE(1)));
+    }
+  const price = [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: Math.min(microLamports, MAX_CU_PRICE) })];
   const alts = new Map<string, AddressLookupTableAccount>();
   for (const b of [...legs.map((l) => l.build), ...(fee ? [fee.build] : [])])
     for (const a of toAlts(b.addressesByLookupTableAddress)) alts.set(a.key.toBase58(), a);
