@@ -3,7 +3,7 @@
 // never return internal error details (RPC URLs can embed API keys).
 import { Connection, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { getPrices, searchTokens, type TokenMeta } from "./jupiter.js";
+import { getPrices, jupStats, searchTokens, type TokenMeta } from "./jupiter.js";
 import { getHoldings } from "./wallet.js";
 import { feeApplies, planSwaps, type FeeConfig } from "./plan.js";
 
@@ -227,7 +227,9 @@ export const plan = wrap(async (req) => {
     else items.push({ h: r.h, usd: r.usd });
   }
 
-  const result = await planSwaps({
+  const stats = { calls: 0, r429: 0, ms: 0, build: 0, buildMs: 0 };
+  const t0 = Date.now();
+  const result = await jupStats.run(stats, () => planSwaps({
     connection,
     apiKey,
     owner,
@@ -239,7 +241,8 @@ export const plan = wrap(async (req) => {
     maxLoss,
     closeSource: b.closeAccounts !== false,
     fee: feeConfig(),
-  });
+  }));
+  console.log(JSON.stringify({ plan: { tokens: items.length, txs: result.batches.length, skipped: result.skipped.length, ms: Date.now() - t0, out: outMint.slice(0, 4), jup: stats } }));
   // Jupiter/RPC error text can be noisy or leak details; keep reasons short and generic.
   // A Jupiter rate limit is not "no market": say so, so the UI can offer a retry instead of giving up.
   skipped.push(

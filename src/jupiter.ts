@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 const BASE = "https://api.jup.ag";
 
 export interface ApiInstruction {
@@ -26,10 +28,21 @@ export interface PriceInfo {
   decimals: number;
 }
 
+/** Per-request call stats (set by the caller with jupStats.run) so slow previews can be diagnosed from logs. */
+export const jupStats = new AsyncLocalStorage<{ calls: number; r429: number; ms: number; build: number; buildMs: number }>();
+
 async function get<T>(apiKey: string, path: string, params: Record<string, string>): Promise<T> {
   const url = `${BASE}${path}?${new URLSearchParams(params)}`;
+  const stats = jupStats.getStore();
   for (let attempt = 0; ; attempt++) {
+    const t0 = Date.now();
     const res = await fetch(url, apiKey ? { headers: { "x-api-key": apiKey } } : {});
+    if (stats) {
+      const dt = Date.now() - t0;
+      stats.calls++; stats.ms += dt;
+      if (path.includes("/build")) { stats.build++; stats.buildMs += dt; }
+      if (res.status === 429) stats.r429++;
+    }
     if (res.status === 429 && attempt < 4) {
       await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
       continue;
