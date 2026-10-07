@@ -76,7 +76,9 @@ Jupiter (rate limit, server error or timeout) is reported as `quote service busy
 when a token was skipped as `not enough SOL` it adds `solLamports` (the wallet's SOL balance);
 `/api/status?h=1` returns `{ statuses, blockHeight }` (height read first) so the UI can declare a transaction
 expired once the chain passes the `lastValidBlockHeight` from `/api/refresh` (it asks twice before saying so);
-`/api/send` marks an uncertain relay error with `uncertain: true` so the UI keeps tracking that signature.
+`/api/send` marks an uncertain relay error with `uncertain: true` so the UI keeps tracking that signature, and
+answers `network busy, try again` for a transaction the RPC kept refusing (never forwarded, so the page says so
+right away).
 
 Server-side limits (per warm instance, a backstop to the firewall rule below): `/api/plan` allows 40 requests
 and 90 tokens per minute per IP (counted in tokens, so chunk size doesn't matter); consecutive chunks of one
@@ -263,6 +265,13 @@ Layout: `public/` is the static site, `api/*.ts` are Vercel Functions, `src/` is
      at a time (simulations stay 3 at a time for the RPC's sake) and price/metadata batches go out together. Each
      token costs about one Jupiter call (plus one fee quote per chunk), so on the Free plan a 30-token preview takes
      about 40s; on Developer and up, a few seconds. Set higher than the plan allows, it mostly costs 429 waits (a token still refused after six is "busy").
+   - `RPC_RPS` and `RPC_SEND_RPS` (optional): requests per second your RPC plan allows, for all calls and for
+     `sendTransaction`, which providers cap far lower. The defaults are Helius Free's (`10` and `1`); Helius
+     Developer is `50` and `5`, Business `200` and `50`. **Set them to your plan's**: every RPC call is paced to
+     them, and a 429 backs off and retries (sends for up to 40s, other calls for 10s) instead of failing. Before
+     this, `/api/send` handed a whole batch to the RPC at once, most of it came back 429, and those swaps never
+     went out. At `1` a 30-transaction send takes about 30s; at `5`, about 6s. Like `JUPITER_RPS`, the pacing is
+     per warm instance, and each API function has its own, so the retries are what absorb the overlap.
    These all stay server-side and are never sent to the browser.
 3. **Add two rate limits** so nobody can drain your Jupiter/RPC quota: Project → *Firewall* → *Add rule*:
    - if Request Path starts with `/api`, rate limit to 60 requests per 60s per IP (a 30-token preview is 4
@@ -284,8 +293,11 @@ Layout: `public/` is the static site, `api/*.ts` are Vercel Functions, `src/` is
    ```
    The handlers also have a per-instance limiter, but that's only a backstop. After deploying, check that
    `curl -I https://<your-domain>/i/So11111111111111111111111111111111111111112` answers `200 image/webp`.
-4. **Set a spend limit** under Team Settings → Billing, so a traffic spike can't surprise you.
-5. **Test on the preview deployment** with a wallet holding a few dollars of dust before sharing the link.
+4. **Turn on Web Analytics** (Project → *Analytics* → *Enable*) to see traffic. The page already loads
+   `/_vercel/insights/script.js`, which Vercel serves from the site's own origin once Analytics is on (until then it
+   404s harmlessly), so the CSP needs no change. It sets no cookies, and Duster's URLs never carry a wallet address.
+5. **Set a spend limit** under Team Settings → Billing, so a traffic spike can't surprise you.
+6. **Test on the preview deployment** with a wallet holding a few dollars of dust before sharing the link.
 
 ### Buy-and-burn fee
 

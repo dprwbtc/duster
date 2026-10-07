@@ -2,11 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import readline from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
 import { getPrices } from "./jupiter.js";
 import { getHoldings } from "./wallet.js";
 import { planSwaps } from "./plan.js";
 import { classifyMints, hintsFrom } from "./nft.js";
+import { rpcConnection } from "./rpc.js";
 
 const SOL = "So11111111111111111111111111111111111111112";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -45,7 +46,7 @@ const rpc = process.env.RPC_URL ?? "https://api.mainnet-beta.solana.com";
 if (a.owner && a.execute) (console.error("--owner is dry-run only; use KEYPAIR_PATH to execute"), process.exit(1));
 const payer = a.owner ? null : Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(need("KEYPAIR_PATH").replace(/^~/, os.homedir()), "utf8"))));
 const ownerKey = payer?.publicKey ?? new PublicKey(a.owner!);
-const connection = new Connection(rpc, "confirmed");
+const connection = rpcConnection(rpc);
 const fee = a["fee-mint"] ? { bps: Number(a["fee-bps"]), burnMint: new PublicKey(a["fee-mint"]).toBase58(), slippageBps: 300 } : null;
 
 const maxUsd = Number(a["max-usd"]);

@@ -2058,8 +2058,9 @@ async function sendAndTrack(items, signed, ep, copy) {
       const s = sigs[i];
       if (typeof s === "string") { it.sig = s; it.status = "confirming"; return; }
       const err = String(s?.error || "rejected by the network");
-      // only a preflight rejection is definitive; anything else may still land, so keep watching the signature
-      const definitive = !s?.uncertain && /simulation failed|expired/.test(err);
+      // only a preflight rejection or the RPC refusing the send is definitive; anything else may still land, so
+      // keep watching the signature
+      const definitive = !s?.uncertain && /simulation failed|expired|busy/.test(err);
       if (it.sig && !definitive) { it.status = "confirming"; it.note = CHECKING; }
       else { it.status = "never"; it.note = copy.notSent(err); }
     });

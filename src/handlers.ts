@@ -1,7 +1,7 @@
 // HTTP handlers shared by the Vercel functions (api/*.ts) and the local dev server (src/server.ts).
 // Everything here is reachable by anyone on the internet once deployed, so validate all input and
 // never return internal error details (RPC URLs can embed API keys).
-import { Connection, PublicKey, VersionedTransaction } from "@solana/web3.js";
+import { PublicKey, VersionedTransaction, type Connection } from "@solana/web3.js";
 import bs58 from "bs58";
 import { JUP_RPS, JupiterError, getPrices, jupStats, searchTokens, type PriceInfo, type TokenMeta } from "./jupiter.js";
 import { getHoldings, getTokenAccounts, parseTokenAccount, type TokenAccount } from "./wallet.js";
@@ -11,6 +11,7 @@ import { readMeta } from "./meta.js";
 import { classifyMints, hintsFrom, isNftKind, kindCounts, type MintClass, type NftKind } from "./nft.js";
 import { RpcUnavailable, tokenImage } from "./imgproxy.js";
 import { planReclaim, type ReclaimItem } from "./reclaim.js";
+import { isRateLimited, rpcConnection, rpcStats } from "./rpc.js";
 import { TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 
 const SOL = "So11111111111111111111111111111111111111112";
@@ -47,7 +48,7 @@ function env() {
   const rpc = process.env.RPC_URL;
   // The public RPC rate-limits hard and blocks the token-account queries this app needs.
   if (!rpc && process.env.VERCEL) throw new Error("RPC_URL is not set");
-  return { apiKey, connection: new Connection(rpc ?? "https://api.mainnet-beta.solana.com", "confirmed") };
+  return { apiKey, connection: rpcConnection(rpc ?? "https://api.mainnet-beta.solana.com") };
 }
 
 // Best-effort per-IP limiter. Serverless instances don't share memory, so this only blunts bursts
@@ -90,12 +91,15 @@ async function readJson(req: Request): Promise<any> {
 function wrap(fn: (req: Request) => Promise<unknown>) {
   return async (req: Request): Promise<Response> => {
     try {
-      return Response.json(await fn(req), { headers: { "Cache-Control": "no-store" } });
+      const body = await rpcStats.run({ calls: 0, r429: 0, waitMs: 0 }, () => fn(req));
+      return Response.json(body, { headers: { "Cache-Control": "no-store" } });
     } catch (e) {
       if (e instanceof HttpError) return Response.json({ error: e.message }, { status: e.status });
       console.error(e);
       // Jupiter being slow or rate-limited is momentary and says nothing about the wallet: tell the user to retry.
       if (e instanceof JupiterError && e.busy) return Response.json({ error: "Prices and quotes are busy right now. Try again in a moment." }, { status: 503 });
+      // So is our RPC refusing calls for its rate limit, even after rpc.ts backed off and retried.
+      if (isRateLimited(e)) return Response.json({ error: "The network is busy right now. Try again in a moment." }, { status: 503 });
       return Response.json({ error: "Something went wrong on the server. Please try again." }, { status: 500 });
     }
   };
@@ -311,7 +315,7 @@ export const plan = wrap(async (req) => {
     closeSource: b.closeAccounts !== false,
     fee,
   }));
-  console.log(JSON.stringify({ plan: { tokens: items.length, txs: result.batches.length, skipped: result.skipped.length, ms: Date.now() - t0, out: outMint.slice(0, 4), jup: stats } }));
+  console.log(JSON.stringify({ plan: { tokens: items.length, txs: result.batches.length, skipped: result.skipped.length, ms: Date.now() - t0, out: outMint.slice(0, 4), jup: stats, rpc: rpcStats.getStore() } }));
   // Jupiter/RPC error text can be noisy or leak details; keep reasons short and generic. (A busy Jupiter is
   // already reported as "quote service busy" by the planner, so the UI offers a retry instead of giving up.)
   skipped.push(...result.skipped.map((s) => ({ mint: s.mint, reason: s.reason.startsWith("no route") ? "no route found" : s.reason })));
@@ -388,7 +392,9 @@ export const send = wrap(async (req) => {
   if (txs.some(({ tx }) => tx.signatures.some((sig) => sig.every((byte) => byte === 0)))) throw new HttpError(400, "transaction is not signed");
   const raws = txs.map(({ raw }) => raw);
   const { connection } = env();
-  // Each transaction stands alone (its own swap and buy-and-burn), so they can go out together.
+  const t0 = Date.now();
+  // Each transaction stands alone (its own swap and buy-and-burn), so they can all be handed over at once; rpc.ts
+  // spaces them out to the RPC plan's sendTransaction rate.
   // A preflight rejection means the RPC never forwarded the transaction, so the answer is definitive. Anything
   // else (timeouts, dropped connections, RPC errors after forwarding) is uncertain: the transaction may still
   // land, and `uncertain: true` tells the UI to keep tracking it by signature.
@@ -401,10 +407,14 @@ export const send = wrap(async (req) => {
         const s = String(e);
         if (/blockhash not found/i.test(s)) return { error: "expired, please preview again" };
         if (/simulation failed|preflight/i.test(s)) return { error: "rejected by the network (simulation failed)" };
+        // The RPC refused the request itself (its rate limit, still after rpc.ts's retries): nothing was forwarded.
+        if (isRateLimited(e)) return { error: "network busy, try again" };
         return { error: "no clear answer from the network", uncertain: true };
       }
     }),
   );
+  const errs = sigs.filter((s): s is { error: string; uncertain?: true } => typeof s !== "string");
+  console.log(JSON.stringify({ send: { txs: sigs.length, sent: sigs.length - errs.length, busy: errs.filter((e) => e.error.startsWith("network busy")).length, uncertain: errs.filter((e) => e.uncertain).length, ms: Date.now() - t0, rpc: rpcStats.getStore() } }));
   return sigs;
 });
 
