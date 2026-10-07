@@ -8,6 +8,8 @@ import { getHoldings } from "./wallet.js";
 import { feeApplies, planSwaps, type FeeConfig } from "./plan.js";
 
 const SOL = "So11111111111111111111111111111111111111112";
+const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const MAX_TOKENS_PER_PLAN = 30; // each token costs a Jupiter /build call plus simulations
 const MAX_TXS_PER_SEND = 30; // one transaction per token, so this matches MAX_TOKENS_PER_PLAN
 const MAX_TX_BYTES = 1232;
@@ -39,17 +41,18 @@ function env() {
 
 // Best-effort per-IP limiter. Serverless instances don't share memory, so this only blunts bursts
 // against one warm instance; the real limit is the Vercel WAF rule described in the README.
+// `cost` lets a bucket count work instead of requests (the plan bucket charges one unit per token).
 const hits = new Map<string, { n: number; reset: number }>();
-function rateLimit(req: Request, bucket: string, perMinute: number) {
+function rateLimit(req: Request, bucket: string, perMinute: number, cost = 1) {
   const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
   const key = `${bucket}:${ip}`;
   const now = Date.now();
   const e = hits.get(key);
   if (!e || e.reset < now) {
     if (hits.size > 10_000) hits.clear();
-    hits.set(key, { n: 1, reset: now + 60_000 });
-  } else if (++e.n > perMinute) {
-    throw new HttpError(429, "Too many requests, slow down and try again in a minute.");
+    hits.set(key, { n: cost, reset: now + 60_000 });
+  } else if ((e.n += cost) > perMinute) {
+    throw new HttpError(429, "Duster is busy right now. Try again in a minute.");
   }
 }
 
@@ -93,7 +96,24 @@ async function metaFor(apiKey: string, mints: string[]): Promise<Map<string, Tok
   return out;
 }
 
-async function holdingsWithValue(apiKey: string, connection: Connection, owner: PublicKey) {
+// A chunked preview sends several /api/plan requests in a row for the same owner. Reusing one balance and
+// price read for a few seconds keeps RPC and Jupiter load per preview roughly constant. /api/holdings always
+// reads fresh (and refreshes this cache), so a retry after a send starts from current balances.
+const HOLDINGS_TTL_MS = 20_000;
+const holdingsCache = new Map<string, { at: number; rows: Promise<Awaited<ReturnType<typeof readHoldingsWithValue>>> }>();
+function holdingsWithValue(apiKey: string, connection: Connection, owner: PublicKey, { fresh = false } = {}) {
+  const key = owner.toBase58();
+  const now = Date.now();
+  const hit = holdingsCache.get(key);
+  if (!fresh && hit && now - hit.at < HOLDINGS_TTL_MS) return hit.rows;
+  if (holdingsCache.size > 2_000) holdingsCache.clear();
+  const rows = readHoldingsWithValue(apiKey, connection, owner);
+  holdingsCache.set(key, { at: now, rows });
+  rows.catch(() => holdingsCache.get(key)?.rows === rows && holdingsCache.delete(key));
+  return rows;
+}
+
+async function readHoldingsWithValue(apiKey: string, connection: Connection, owner: PublicKey) {
   const holdings = (await getHoldings(connection, owner)).filter((h) => h.mint !== SOL);
   const mints = [...new Set(holdings.map((h) => h.mint))];
   const [prices, meta] = await Promise.all([getPrices(apiKey, mints), metaFor(apiKey, mints)]);
@@ -112,25 +132,49 @@ async function holdingsWithValue(apiKey: string, connection: Connection, owner: 
   });
 }
 
+// The config payload is the same for every visitor (fee settings from env, estimate-only prices), so one
+// warm instance answers from memory for a minute instead of spending Jupiter quota on every page load.
+let configMemo: { at: number; ttl: number; body: unknown } | null = null;
 export const config = wrap(async (req) => {
   rateLimit(req, "config", 30);
+  if (configMemo && Date.now() - configMemo.at < configMemo.ttl) return configMemo.body;
   const fee = feeConfig();
-  if (!fee || fee.bps === 0) return { fee: null };
+  const burnMint = fee && fee.bps > 0 ? fee.burnMint : null;
   const { apiKey } = env();
-  const [meta] = (await searchTokens(apiKey, fee.burnMint)).filter((t) => t.id === fee.burnMint);
-  return {
-    fee: {
-      bps: fee.bps,
-      burnToken: { id: fee.burnMint, symbol: meta?.symbol ?? "BURN", name: meta?.name ?? "", icon: meta?.icon ?? null, verified: !!meta?.isVerified },
-    },
-  };
+  let ok = true;
+  // USD prices of the default outputs, so the UI can estimate before a preview. Estimates only: the plan
+  // re-quotes everything, and a price outage must not break the page.
+  const pricesP = getPrices(apiKey, [SOL, USDC, USDT, ...(burnMint ? [burnMint] : [])])
+    .then((p) => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, v.usdPrice])))
+    .catch(() => ((ok = false), {}));
+  let body: unknown;
+  if (!burnMint) body = { fee: null, prices: await pricesP };
+  else {
+    // The fee settings come from env, so a token-metadata outage must not hide them: the UI needs the burn
+    // mint to keep that token out of the sell list.
+    const [[meta], prices] = await Promise.all([
+      searchTokens(apiKey, burnMint)
+        .then((r) => r.filter((t) => t.id === burnMint))
+        .catch((): TokenMeta[] => ((ok = false), [])),
+      pricesP,
+    ]);
+    body = {
+      fee: {
+        bps: fee!.bps,
+        burnToken: { id: burnMint, symbol: meta?.symbol ?? "BURN", name: meta?.name ?? "", icon: meta?.icon ?? null, verified: !!meta?.isVerified },
+      },
+      prices,
+    };
+  }
+  configMemo = { at: Date.now(), ttl: ok ? 60_000 : 10_000, body };
+  return body;
 });
 
 export const holdings = wrap(async (req) => {
   rateLimit(req, "holdings", 20);
   const { apiKey, connection } = env();
   const owner = pubkey(new URL(req.url).searchParams.get("owner"), "owner");
-  const rows = await holdingsWithValue(apiKey, connection, owner);
+  const rows = await holdingsWithValue(apiKey, connection, owner, { fresh: true });
   return rows.map(({ h, ...r }) => ({ mint: h.mint, amount: h.uiAmount, frozen: h.frozen, ...r }));
 });
 
@@ -147,16 +191,20 @@ export const tokenSearch = wrap(async (req) => {
     icon: t.icon ?? null,
     decimals: t.decimals,
     verified: !!t.isVerified,
+    usdPrice: typeof t.usdPrice === "number" ? t.usdPrice : null,
   }));
 });
 
 export const plan = wrap(async (req) => {
-  rateLimit(req, "plan", 10);
+  // The UI previews in chunks, so the budget is counted in tokens (each one costs a Jupiter build plus
+  // simulations), not requests: about three full 30-token previews per minute, whatever the chunk size.
+  rateLimit(req, "plan", 40);
   const b = await readJson(req);
   const owner = pubkey(b.owner, "owner");
   const outMint = pubkey(b.outMint, "outMint").toBase58();
   if (!Array.isArray(b.mints) || b.mints.length === 0) throw new HttpError(400, "select at least one token");
   if (b.mints.length > MAX_TOKENS_PER_PLAN) throw new HttpError(400, `select at most ${MAX_TOKENS_PER_PLAN} tokens at a time`);
+  rateLimit(req, "plan-tokens", 90, b.mints.length);
   const wanted = new Set<string>(b.mints.map((m: unknown) => pubkey(m, "mint").toBase58()));
   wanted.delete(outMint);
   const slippageBps = Math.min(Math.max(Math.round(Number(b.slippageBps) || 100), 1), 2000);
@@ -193,10 +241,20 @@ export const plan = wrap(async (req) => {
     fee: feeConfig(),
   });
   // Jupiter/RPC error text can be noisy or leak details; keep reasons short and generic.
-  skipped.push(...result.skipped.map((s) => ({ mint: s.mint, reason: s.reason.startsWith("no route") ? "no route found" : s.reason })));
+  // A Jupiter rate limit is not "no market": say so, so the UI can offer a retry instead of giving up.
+  skipped.push(
+    ...result.skipped.map((s) => ({
+      mint: s.mint,
+      reason: s.reason.startsWith("no route") ? (/\b429\b/.test(s.reason) ? "quote service busy; try again shortly" : "no route found") : s.reason,
+    })),
+  );
+  const fee = feeConfig();
+  const feeApplied = feeApplies(fee, outMint);
   return {
     skipped,
-    feeApplied: feeApplies(feeConfig(), outMint),
+    feeApplied,
+    burnMint: feeApplied ? fee.burnMint : null,
+    outPrice: outPrice.usdPrice,
     txs: result.batches.map((bt) => {
       const bytes = bt.tx.serialize();
       return {
@@ -206,6 +264,8 @@ export const plan = wrap(async (req) => {
           mint: l.holding.mint,
           usdIn: l.usdIn,
           outAmount: Number(l.build.outAmount) / 10 ** outPrice.decimals,
+          // Guaranteed minimum after slippage, before the fee (the fee is taken from this amount).
+          minOut: Number(l.build.otherAmountThreshold) / 10 ** outPrice.decimals,
         })),
         fee: bt.fee && {
           amountIn: Number(bt.fee.amountIn) / 10 ** outPrice.decimals,
@@ -260,13 +320,19 @@ export const send = wrap(async (req) => {
   const raws = txs.map(({ raw }) => raw);
   const { connection } = env();
   // Each transaction stands alone (its own swap and buy-and-burn), so they can go out together.
+  // A preflight rejection means the RPC never forwarded the transaction, so the answer is definitive. Anything
+  // else (timeouts, dropped connections, RPC errors after forwarding) is uncertain: the transaction may still
+  // land, and `uncertain: true` tells the UI to keep tracking it by signature.
   const sigs = await Promise.all(
-    raws.map(async (raw: Buffer): Promise<string | { error: string }> => {
+    raws.map(async (raw: Buffer): Promise<string | { error: string; uncertain?: true }> => {
       try {
         return await connection.sendRawTransaction(raw, { maxRetries: 3 });
       } catch (e) {
         console.error(e);
-        return { error: /blockhash/i.test(String(e)) ? "expired, please preview again" : "rejected by the network (simulation failed)" };
+        const s = String(e);
+        if (/blockhash not found/i.test(s)) return { error: "expired, please preview again" };
+        if (/simulation failed|preflight/i.test(s)) return { error: "rejected by the network (simulation failed)" };
+        return { error: "no clear answer from the network", uncertain: true };
       }
     }),
   );
@@ -285,6 +351,13 @@ export const status = wrap(async (req) => {
     if (!ok) throw new HttpError(400, "bad signature");
   }
   const { connection } = env();
+  const withHeight = new URL(req.url).searchParams.get("h") === "1";
+  // Height first, statuses second: a transaction that landed before the height was read shows up in the
+  // statuses, so "past lastValidBlockHeight and still no status" can be trusted (the UI also wants it twice).
+  const blockHeight = withHeight ? await connection.getBlockHeight("confirmed") : null;
   const { value } = await connection.getSignatureStatuses(sigs, { searchTransactionHistory: true });
-  return value.map((v) => (v ? { status: v.confirmationStatus, err: v.err } : null));
+  const statuses = value.map((v) => (v ? { status: v.confirmationStatus, err: v.err } : null));
+  // With h=1 the current block height comes along, so the UI can compare it with lastValidBlockHeight from
+  // /api/refresh and say "expired" for certain. Without it, the original array shape is kept.
+  return withHeight ? { statuses, blockHeight } : statuses;
 });

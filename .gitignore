@@ -3,3 +3,4 @@ node_modules
 *.json.key
 .vercel
 .env*
+.DS_Store

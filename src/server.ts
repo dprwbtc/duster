@@ -11,7 +11,7 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicDir = path.join(root, "public");
 const vercel = JSON.parse(fs.readFileSync(path.join(root, "vercel.json"), "utf8"));
 const securityHeaders: [string, string][] = vercel.headers[0].headers.map((x: { key: string; value: string }) => [x.key, x.value]);
-const types: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
+const types: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".webp": "image/webp", ".woff2": "font/woff2", ".json": "application/json", ".txt": "text/plain; charset=utf-8" };
 
 const routes: Record<string, (req: Request) => Promise<Response>> = {
   "GET /api/config": h.config,
@@ -47,11 +47,13 @@ http
       return res.end(Buffer.from(await r.arrayBuffer()));
     }
     const file = path.normalize(path.join(publicDir, url.pathname === "/" ? "index.html" : url.pathname));
-    if (req.method === "GET" && file.startsWith(publicDir + path.sep) && fs.existsSync(file) && fs.statSync(file).isFile()) {
+    // never serve dotfiles (.DS_Store and friends), like Vercel
+    const dotfile = path.relative(publicDir, file).split(path.sep).some((seg) => seg.startsWith("."));
+    if (req.method === "GET" && !dotfile && file.startsWith(publicDir + path.sep) && fs.existsSync(file) && fs.statSync(file).isFile()) {
       res.writeHead(200, { "Content-Type": types[path.extname(file)] ?? "application/octet-stream" });
       return res.end(fs.readFileSync(file));
     }
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end('{"error":"not found"}');
   })
-  .listen(PORT, "127.0.0.1", () => console.log(`Bulk Swap UI: http://localhost:${PORT}`));
+  .listen(PORT, "127.0.0.1", () => console.log(`Duster UI: http://localhost:${PORT}`));
