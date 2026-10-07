@@ -53,7 +53,10 @@ host a token's creator picked, so an airdropped token's image host can't see who
   scene (landing, loading, list, empty, errors, building, review, expired quotes, wallet prompt, sending, success,
   partial failure, expired, 30+ tokens, into $LILVADER, …) and every cleanup state (list, nothing to close,
   loading, error, building, review, review with burns, burn section open, can't close any, big wallet, success,
-  partial, empty wallet with rent). Add
+  partial, empty wallet with rent, only NFTs, NFTs + collectibles + unchecked, only collectibles, NFT collector,
+  only held NFTs, game wallet). The fixtures include NFT and collectible holdings, a priced 0-decimal coin, a mint
+  that couldn't be checked, accounts holding NFTs or collectibles, empty NFT and collectible accounts and a frozen
+  empty NFT account (real mints, so their images are real). Add
   `&outcome=partial|expired` or `&fee=off`. A few fixtures use real mints, so `/api/img` shows real images.
 - `http://localhost:3000/?watch=<address>`: a watch-only wallet that "connects" as that address, so real
   holdings, quotes, `/api/accounts`, `/api/reclaim` (build + simulate) and `/api/refresh` run against real data.
@@ -72,6 +75,59 @@ and 90 tokens per minute per IP (counted in tokens, so chunk size doesn't matter
 preview reuse a 20s cache of the owner's balances and prices; `/api/config` is memoized for 60s;
 `/api/accounts` 20/min; `/api/reclaim` 20/min and 2,000 accounts/min; `/api/img` 300/min (images have their own
 firewall rule, see Deploying).
+
+## NFTs are left alone
+
+Duster never sells, burns or lists NFTs (or SFTs, editions, game items and other collectibles) as tokens.
+`src/nft.ts` classifies every mint from the chain alone (plain RPC, 100 accounts per `getMultipleAccountsInfo`,
+three calls at a time, no Jupiter quota), and the answer is remembered for ten minutes per warm instance.
+
+**A mint with decimals is always fungible**, whatever its metadata says: Metaplex only lets decimals-0 mints be
+NFTs, editions or pNFTs, and the one standard a mint with decimals can carry, FungibleAsset (set by `CreateV1`),
+doesn't make it an SFT (XFEE `96egra…`, ZYNX `EruqNU…`: ordinary, liquid tokens). A **decimals-0** mint is
+non-fungible (`nftKind`: `nft`, `pnft`, `edition`, `sft`, `t22-nft`) if **any** of these holds:
+
+- supply 0 or 1;
+- the Metaplex metadata's `token_standard` is NonFungible, NonFungibleEdition, ProgrammableNonFungible or
+  ProgrammableNonFungibleEdition (the parser in `meta.ts` reads past `uri`, and stops cleanly where older accounts
+  end);
+- a Metaplex edition account exists at `["metadata", MPL, mint, "edition"]` (a master edition, or a numbered print);
+  only decimals-0 mints can have one, so only those pay for the read;
+- a Token-2022 TokenGroup / TokenGroupMember / GroupPointer / GroupMemberPointer extension (WNS and other
+  Token-2022 collections);
+- a Metaplex `collection` set (old SFTs from before `token_standard`);
+- `token_standard` FungibleAsset with a supply under 1,000,000 (a run of items, e.g. Star Atlas crafting parts).
+
+A decimals-0 mint with none of these markers (no `token_standard`, or FungibleAsset with a big supply) is a
+**collectible** (`nftKind: "collectible"`, `tokenIfPriced`): Star Atlas ships, old spam "NFT" airdrops and
+0-decimal coins all look like this, and the chain can't tell them apart. Metaplex writes FungibleAsset on *every*
+decimals-0 mint created with metadata, so it says nothing on its own. Jupiter's price breaks the tie: priced
+(XCOPE, FOXY, KART, SKULL) it's a token and can be sold; unpriced (Opal Jet, Pearce X4, "Core - Episode 5", Star
+Atlas SDU and ores) it's left alone with the NFTs. Either way it's never burned (no decimals: its value can't be
+told). **Fail closed:** when a decimals-0 mint (or one whose decimals aren't known) can't be read for certain, it's
+treated as an NFT, marked `unsure` / `nftUnsure`, and the answer isn't cached.
+
+What that means per endpoint:
+
+- `/api/holdings` marks NFT and collectible rows `{ nft: true, nftKind }` (plus `nftUnsure: true` when the chain
+  couldn't be read just now). NFTs cost no Jupiter calls; collectibles ride in the same price batch as the tokens,
+  since their price is what decides. The pockets list drops them and shows one line, "3 NFTs and 84 collectibles in
+  this wallet are left alone", and unchecked ones as "2 items couldn't be checked just now · check again".
+- `/api/plan` refuses NFTs first, with the reason `NFTs aren't sold here`, before any Jupiter call. Collectibles
+  and unreadable mints are settled by the holdings read (which knows each account's decimals and prices
+  collectibles): `collectibles aren't sold here` when unpriced, the retry reason when still unreadable. The default
+  outputs (SOL, USDC, USDT, the burn token) skip the check; another output that's an NFT or unpriced collectible is
+  refused with a 400, and one that couldn't be read gets a 503 ("try again"), never "that's an NFT".
+- `/api/accounts` marks every account `nft` / `nftKind` (and `nftUnsure`, `tokenIfPriced`). An account still
+  holding an NFT or collectible is never closable and never a burn candidate (`reason: "holds an NFT"` /
+  `"holds a collectible"`, or `frozen` for a pNFT), and the cleanup doesn't list it (one "left alone" line
+  instead; a collectible the pockets list knows as a priced coin counts as a held token). An **empty** account
+  whose mint is an NFT or collectible holds nothing, so it stays closable and is listed in its own group, "empty
+  NFT accounts: the NFT already left this wallet; closing returns the rent" (or "collectible" / "NFT &
+  collectible"), picked by default like any other empty account. Unchecked accounts are never called NFTs.
+- `/api/reclaim` checks every `burn` against the classifier on the server (not just decimals), whatever the page
+  sent, and `close` still requires an empty account.
+- The CLI skips NFTs and unpriced collectibles the same way.
 
 ## The cleanup: rent back from token accounts (no fee)
 
@@ -92,8 +148,9 @@ reachable from the landing ("just reclaim rent", which works for wallets with no
   burned and closed. It's collapsed and off by default, needs an explicit "burned tokens are gone for good"
   confirmation, and the server re-checks the value and refuses anything worth $1 or more. If prices can't be
   read, nothing is offered for burning. Dust with no price is listed apart as "value unknown" and never included by
-  "select all": each one is ticked by hand. NFTs and other decimals-0 tokens (Jupiter has no price for them, which
-  says nothing about their value) and the burn token are never offered and are refused by the server.
+  "select all": each one is ticked by hand. NFTs and collectibles (see "NFTs are left alone"), other decimals-0 tokens (Jupiter
+  has no price for them, which says nothing about their value) and the burn token are never offered and are
+  refused by the server.
 - **Jupiter quota.** Listing accounts costs RPC only. Prices (one paced `/price` call per 50 held mints) are read
   only when the burn section is opened, and again by `/api/reclaim` when a burn is actually requested.
 - **Wrapped SOL** can be closed too: closing unwraps it, so its balance lands in the wallet with the rent.
@@ -106,8 +163,8 @@ API:
 - `GET /api/accounts?owner=<address>` → `{ accounts: [...], priceError }`. Every token account of the owner
   across Token and Token-2022, empty ones included: `address, mint, program, amount` (raw string)`, decimals,
   uiAmount, frozen, native, rentLamports, lamports, closeAuthority, closable, reason` (when not closable:
-  `frozen`, `close authority is someone else`, `has balance`)`, burnCandidate, burnBlock, burnable, withheld, name,
-  symbol, verified, usd`, plus `priced` and `priceError` at the top level. Names come from on-chain metadata
+  `frozen`, `close authority is someone else`, `has balance`, `holds an NFT`, `holds a collectible`)`, burnCandidate,
+  burnBlock, burnable, withheld, nft, nftKind, nftUnsure, tokenIfPriced, name, symbol, verified, usd`, plus `priced` and `priceError` at the top level. Names come from on-chain metadata
   (Metaplex PDAs read 100 per `getMultipleAccountsInfo`, or the Token-2022 metadata extension), or from Jupiter
   only when this owner's holdings are already in the same process's memory (locally; on Vercel each function has
   its own memory, so `verified` is generally false there). Without `&prices=1` the response costs RPC only:
@@ -118,7 +175,7 @@ API:
   mint, action: "close" | "burn+close", rentLamports, lamports, native }], rentLamports, lamports, feeLamports }],
   skipped: [{ address, reason }], blockhash, lastValidBlockHeight, cuPrice }`. Every account is re-read on the
   server and checked (owned by `owner`, owner is the close authority or none is set, not frozen; `close` accounts
-  empty unless wrapped SOL; `burn` accounts below $1 or unpriced, never decimals-0 tokens or the burn token). Each transaction is simulated
+  empty unless wrapped SOL; `burn` accounts below $1 or unpriced, never NFTs or collectibles by the classifier, other decimals-0 tokens or the burn token). Each transaction is simulated
   (`sigVerify: false`, `replaceRecentBlockhash: true`) and its compute limit set to 1.2× what it used. When a
   simulation fails on one instruction, that account is skipped with a plain reason and the rest re-simulated
   (bisecting when the failure can't be pinned to one account). Unsigned; capped at 400 accounts per request.
@@ -245,6 +302,8 @@ reducing the token's supply. Any extra from positive slippage stays with the use
   balance changes before approval.
 - The server re-reads balances and prices itself and ignores amounts sent by the browser. It skips tokens with no
   reliable price and routes that lose more than the user's limit (capped at 50%). Slippage is capped at 20%.
+- NFTs and collectibles are classified on-chain and never sold or burned, whatever the browser asks for (fail
+  closed when unsure).
 - Every transaction is simulated before it's offered for signing. A plan older than 45s is rebuilt before
   signing, and transactions get a fresh blockhash right before the wallet prompt so they don't expire.
 - Strict Content-Security-Policy (scripts only from this site), `frame-ancestors 'none'` against

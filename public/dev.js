@@ -8,6 +8,10 @@
    ?demo              Everything from fixtures, plus a "states" popover that jumps to any scene or state, the
                       cleanup (rent reclaim) included. A few fixtures use real mints so /api/img shows real images.
    ?watch also reads the real /api/accounts and builds + simulates real /api/reclaim transactions.
+   NFTs: the fixtures include NFT and collectible holdings (hidden from the list, one "left alone" line), one the
+   server couldn't check (counted apart), a priced 0-decimal coin (a token, never burned), accounts still holding an
+   NFT or collectible (never listed in the cleanup), empty NFT and collectible accounts (their own group) and a frozen
+   empty NFT account (can't be closed). Real mints, so images are real.
    &outcome=success|partial|expired   send outcome for the simulation (also switchable in the simulated prompt)
    &fee=off           demo only: the no-fee deployment */
 
@@ -46,6 +50,25 @@ class DevApiError extends Error { constructor(msg, status) { super(msg); this.st
 
 /* ---------------- fixtures ---------------- */
 const PRICES = { [SOL]: 152.4, [USDC]: 1, [USDT]: 1, [BURN]: 0.0000156 };
+// real mainnet NFTs (as the server's classifier sees them), so /api/img shows their real pictures
+const NFTS = {
+  madlads: ["MAD", "Mad Lads", "J1S9H3QjnRtBbbuD4HjPV6RpRhwuk4zKbxsnCHuTgh9w", "pnft"],
+  degod: ["DGOD", "DeGod #5142", "5F5wQHPxX2yLwuYEVFpBxu1oQzQWWxQyNHPaC7ZavxTb", "pnft"],
+  citizen: ["DEMO", "Democracy Citizen #3748", "Gh4Sfru9a3vLnoag9wkygQykeBLV1VV7iywjqLSHTS4h", "nft"],
+  burger: ["BURGER", "Burger #1946", "3LG6nFphb11cf4jeEU8bMuSXXpA18Ze9SWQNUcpfjQsg", "t22-nft"],
+  saga: ["SAGAGEN", "Saga genesis token", "46pcSL5gmjBrPqGKFaLbbCmR6iVuLJbnQy13hAe7s6CC", "nft"],
+  // collectibles: decimals 0, no NFT marker on-chain, no Jupiter price (Star Atlas ships and parts, an old airdrop)
+  opaljet: ["OPALJ", "Opal Jet", "Ev3xUhc1Leqi4qR2E5VoG9pcxCvHHmnAaSRVPg485xAT", "collectible", 3],
+  airbike: ["FMBA", "Fimbul Airbike", "Fw8PqtznYtg4swMk7Yjj89Tsj23u5CJLfW5Bk8ro4G1s", "collectible", 1],
+  copper: ["CUORE", "Copper Ore", "CUore1tNkiubxSwDEtLc3Ybs1xfWLs8uGjyydUYZ25xc", "sft", 12100],
+  core5: ["CORE5", "Core - Episode 5 (Magic Eden)", "8fGDD3bwfNvEy4ER7ttfpccbvRUADjqG53PEXfnT7CbW", "collectible", 1],
+};
+// what /api/holdings answers for an NFT or collectible: marked, never priced (the page drops it and counts it)
+const NFT_ROW = (k) => { const [symbol, name, mint, kind, n = 1] = NFTS[k]; return { ...T(symbol, name, null, n, { mint }), nft: true, nftKind: kind }; };
+// a decimals-0 mint the server couldn't read just now: left alone, but counted apart (never called an NFT)
+const UNSURE_ROW = () => ({ ...T(null, null, null, 31, { mint: fakeKey("unsure0") }), nft: true, nftKind: "nft", nftUnsure: true });
+// XCOPE: decimals 0 and no NFT marker, but Jupiter prices it, so it's a token (sellable; never burned)
+const XCOPE = "3K6rftdAaQYMPunrtNRHgnK2UAtjm2JwyT2oCiTDouYE";
 const T = (symbol, name, usd, amount, x = {}) => ({ mint: x.mint || fakeKey("m" + symbol + name), amount, frozen: !!x.frozen, usd, price: usd == null ? null : usd / amount, symbol, name, icon: x.icon ?? null, verified: !!x.verified, _loss: x.loss ?? 0.02, _skip: x.skip || null });
 const HOLDINGS = {
   normal: () => [
@@ -67,7 +90,18 @@ const HOLDINGS = {
     T("<b>FREE</b>", "Claim 5,000 USDC at fr33-usdc.xyz <img src=x onerror=alert(1)>", null, 5000),
     T("SPAM42", "spam", null, 1e9),
     { ...T(null, null, null, 1), mint: fakeKey("ghost") },
+    T("XCOPE", "XCOPE", 0.33, 3, { mint: XCOPE, loss: 0.03 }),
+    NFT_ROW("degod"), NFT_ROW("citizen"), NFT_ROW("burger"), NFT_ROW("opaljet"), NFT_ROW("copper"),
   ],
+  // nothing but NFTs: "wallet's spotless", plus the left-alone line
+  nfts: () => [NFT_ROW("madlads"), NFT_ROW("degod"), NFT_ROW("citizen"), NFT_ROW("burger"), NFT_ROW("saga")],
+  // a game wallet: collectibles, one NFT, one mint that couldn't be checked, and a little real dust
+  collectibles: () => [
+    T("JUP", "Jupiter", 0.71, 1, { verified: true, mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN" }),
+    NFT_ROW("opaljet"), NFT_ROW("airbike"), NFT_ROW("copper"), NFT_ROW("core5"), NFT_ROW("citizen"), UNSURE_ROW(),
+  ],
+  // only collectibles: the empty state says so before the line below the card
+  collectiblesOnly: () => [NFT_ROW("opaljet"), NFT_ROW("airbike"), NFT_ROW("core5")],
   airdrop: () => {
     const r = rng(77), syl = ["PEP", "DOG", "CAT", "WIF", "MOON", "GM", "BRO", "SAD", "FROG", "MEME", "DUST", "GLIZ", "HAWK", "BUN", "ZAP", "PUFF", "RIZZ", "SNEK", "WOOF", "YETI"];
     return Array.from({ length: 38 }, (_, i) => {
@@ -86,14 +120,21 @@ const AC = (symbol, name, x = {}) => {
   return {
     address: fakeKey("acct" + symbol + name + (x.n ?? "")), mint: x.mint || fakeKey("m" + symbol + name), program: x.t22 ? "token-2022" : "token",
     amount, decimals: x.decimals ?? 6, uiAmount: x.ui ?? 0, frozen: !!x.frozen, native: !!x.native, rentLamports: rent, lamports: rent + (x.wrapped || 0),
-    closeAuthority: x.foreign ? fakeKey("auth" + symbol) : null, closable, reason: blocked || (closable ? undefined : "has balance"),
-    // like the server: never NFTs (decimals 0) or the burn token; priced only when the page asks with prices=1
-    burnCandidate: !blocked && amount !== "0" && !x.native && (x.decimals ?? 6) > 0 && x.mint !== BURN, withheld: !!x.withheld,
+    closeAuthority: x.foreign ? fakeKey("auth" + symbol) : null, closable,
+    reason: blocked || (closable ? undefined : !x.nft ? "has balance" : x.nft === "sft" || x.nft === "collectible" ? "holds a collectible" : "holds an NFT"),
+    // like the server: never NFTs, collectibles, other decimals-0 tokens or the burn token; priced only when the page asks with prices=1
+    burnCandidate: !blocked && amount !== "0" && !x.native && !x.nft && (x.decimals ?? 6) > 0 && x.mint !== BURN, withheld: !!x.withheld,
+    nft: !!x.nft, nftKind: x.nft ? x.nft : null,
+    ...(x.unsure ? { nftUnsure: true } : {}), ...(x.nft === "collectible" ? { tokenIfPriced: true } : {}),
     symbol, name, verified: !!x.verified, _usd: x.usd ?? null, _skip: x.skip || null,
   };
 };
 // what /api/accounts answers: prices (and so "burnable") only with prices=1
 const priced = (a, withPrices) => ({ ...a, usd: withPrices && a.burnCandidate ? a._usd : null, burnable: withPrices && a.burnCandidate && (a._usd == null || a._usd < 1) });
+// an NFT account: holding the NFT (amount 1), or empty because the NFT already left (closable, its own group)
+const ANFT = (k, x = {}) => { const [symbol, name, mint, kind] = NFTS[k]; return AC(symbol, name, { mint, decimals: 0, nft: kind, t22: kind === "t22-nft", ...x }); };
+// a mint the server couldn't read just now (decimals 0): held ones are counted apart, empty ones close with the rest
+const AUNSURE = (x = {}) => AC(null, null, { mint: fakeKey("unsure0"), decimals: 0, nft: "nft", unsure: true, ...x });
 const EMPTY_SET = [
   ["BONK", "Bonk", { mint: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", verified: true }],
   ["WIF", "dogwifhat", { mint: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", verified: true }],
@@ -113,7 +154,14 @@ const ACCOUNTS = {
     AC("Free Airdrop", "Free airdrop at www.drop-xyz.top", { amount: 1e9, ui: 1000 }),
     AC("FRZN", "Frozen Thing", { frozen: true, amount: 120, ui: 120, usd: 0.3 }),
     AC("BOT", "bot account", { foreign: true }),
-    AC("APE", "Lil Ape #4412", { amount: 1, ui: 1, decimals: 0 }),
+    AC("APE", "Lil Ape #4412", { amount: 1, ui: 1, decimals: 0, nft: "nft" }),
+    ANFT("degod", { amount: 1, ui: 1, frozen: true }), // a pNFT's account is always frozen; still just "left alone"
+    // decimals 0, no NFT marker: a collectible to the server, a token once the pockets list has its price; never burned
+    AC("XCOPE", "XCOPE", { mint: XCOPE, amount: 3, ui: 3, decimals: 0, nft: "collectible" }),
+    ANFT("opaljet", { amount: 3, ui: 3 }), ANFT("copper", { amount: 12100, ui: 12100 }),
+    ANFT("madlads", { n: "e" }), ANFT("citizen", { n: "e" }), ANFT("burger", { n: "e" }), ANFT("core5", { n: "e" }),
+    ANFT("saga", { n: "e", frozen: true }), // an empty NFT account its collection froze: can't be closed, still never "the token's"
+    AUNSURE({ n: "e" }),
     AC("SPCX", "spacex dust", { amount: 870000, ui: 0.87, usd: 0.87 }),
     AC("JUP", "Jupiter", { mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", amount: 58100000, ui: 58.1, usd: 41.2, verified: true }),
     AC("LILVADER", "Lil Vader", { mint: BURN, amount: 2e11, ui: 200000, usd: 3.12, verified: true, t22: true }),
@@ -126,6 +174,18 @@ const ACCOUNTS = {
     AC("BOT", "bot account", { foreign: true }),
     AC("FRZN", "Frozen Thing", { frozen: true }),
     AC("JUP", "Jupiter", { mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", amount: 58100000, ui: 58.1, usd: 41.2, verified: true }),
+  ],
+  // a collector: every account holds an NFT or used to
+  nfts: () => [
+    ANFT("degod", { amount: 1, ui: 1, frozen: true }), ANFT("citizen", { amount: 1, ui: 1 }), ANFT("burger", { amount: 1, ui: 1 }),
+    ANFT("madlads", { n: "e" }), ANFT("saga", { n: "e" }),
+  ],
+  nftsHeldOnly: () => [ANFT("degod", { amount: 1, ui: 1, frozen: true }), ANFT("citizen", { amount: 1, ui: 1 })],
+  // a game wallet: collectibles held and gone, one NFT, one account that couldn't be checked
+  collectibles: () => [
+    ANFT("opaljet", { amount: 3, ui: 3 }), ANFT("airbike", { amount: 1, ui: 1 }), ANFT("copper", { amount: 12100, ui: 12100 }),
+    ANFT("citizen", { amount: 1, ui: 1 }), AUNSURE({ amount: 31, ui: 31 }),
+    ANFT("core5", { n: "e" }), ANFT("madlads", { n: "e" }),
   ],
   none: () => [
     AC("JUP", "Jupiter", { mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", amount: 58100000, ui: 58.1, usd: 41.2, verified: true }),
@@ -295,12 +355,13 @@ export async function init(app, params) {
     const outPrice = PRICES[b.outMint] ?? CATALOG.find((c) => c.id === b.outMint)?.usdPrice;
     if (!outPrice) throw new DevApiError("The token you're swapping into has no reliable price, so swaps can't be checked. Pick another.", 400);
     const feeApplied = !feeOff && b.outMint !== BURN;
-    const all = [...HOLDINGS.normal(), ...HOLDINGS.airdrop()];
+    const all = [...HOLDINGS.normal(), ...HOLDINGS.airdrop(), ...HOLDINGS.nfts(), ...HOLDINGS.collectibles()];
     const skipped = [], txs = [];
     const maxLoss = Math.min(Math.max(Number(b.maxLossPct) || 0, 0), 50) / 100, slip = (b.slippageBps || 100) / 10_000;
     for (const mint of b.mints) {
       const r = all.find((x) => x.mint === mint);
       if (!r) { skipped.push({ mint, reason: "not in wallet" }); continue; }
+      if (r.nft) { skipped.push({ mint, reason: r.nftUnsure ? "couldn't check whether it's an NFT right now; try again" : r.nftKind === "sft" || r.nftKind === "collectible" ? "collectibles aren't sold here" : "NFTs aren't sold here" }); continue; }
       if (r.frozen) { skipped.push({ mint, reason: "account frozen" }); continue; }
       if (r.usd == null) { skipped.push({ mint, reason: "no reliable price" }); continue; }
       if (r._skip) { skipped.push({ mint, reason: r._skip.startsWith("no route") ? "no route found" : r._skip }); continue; }
@@ -315,14 +376,14 @@ export async function init(app, params) {
   // about 20 closes per "transaction", like the real packing; fixtures marked _skip are skipped with that reason
   async function fakeReclaim(b, signal) {
     await sleep(dev.planDelay, signal);
-    const all = [...ACCOUNTS.normal(), ...ACCOUNTS.many(), ...ACCOUNTS.none()];
+    const all = [...ACCOUNTS.normal(), ...ACCOUNTS.many(), ...ACCOUNTS.none(), ...ACCOUNTS.nfts(), ...ACCOUNTS.collectibles()];
     const skipped = [], ok = [];
     for (const [addr, burn] of [...(b.close || []).map((a) => [a, false]), ...(b.burn || []).map((a) => [a, true])]) {
       const a = all.find((x) => x.address === addr);
       if (!a) skipped.push({ address: addr, reason: "not a token account (already closed?)" });
       else if (a._skip) skipped.push({ address: addr, reason: a._skip });
       else if (!burn && !a.closable) skipped.push({ address: addr, reason: a.reason || "it still holds tokens" });
-      else if (burn && a.amount !== "0" && !a.burnCandidate) skipped.push({ address: addr, reason: a.decimals === 0 ? "it looks like an NFT or collectible (no decimals), so it's never burned here" : "that's the burn token; keep it or sell it instead" });
+      else if (burn && a.amount !== "0" && !a.burnCandidate) skipped.push({ address: addr, reason: a.nft && (a.nftKind === "sft" || a.nftKind === "collectible") && !a.nftUnsure ? "it's a collectible, and collectibles are never burned here" : a.nft ? "it's an NFT, and NFTs are never burned here" : a.decimals === 0 ? "it has no decimals, so its value can't be told; it's never burned here" : "that's the burn token; keep it or sell it instead" });
       else if (burn && a._usd != null && a._usd >= 1) skipped.push({ address: addr, reason: `worth about $${a._usd.toFixed(2)}, so it's not burned; sell it instead` });
       else ok.push({ address: a.address, mint: a.mint, action: burn ? "burn+close" : "close", rentLamports: a.rentLamports, lamports: a.lamports, native: a.native, uiAmount: a.uiAmount });
     }
@@ -449,6 +510,9 @@ export async function init(app, params) {
     ["edge cases", [
       ["no wallet found", async () => { await landing(); dev.hideWallets = true; app.state.booted = true; app.openWallets(); }],
       ["empty wallet", () => connected("empty")],
+      ["only NFTs", () => connected("nfts")],
+      ["NFTs, collectibles, unchecked", () => connected("collectibles")],
+      ["only collectibles", () => connected("collectiblesOnly")],
       ["holdings error", () => connected("error")],
       ["error toast", async () => { await connected("normal"); app.toast({ title: "the server timed out", body: "Try fewer tokens at once. Nothing was signed or sent.", tone: "bad", actions: [{ label: "try again", run: () => app.startPreview() }] }); }],
       ["30+ tokens", () => connected("airdrop")],
@@ -461,6 +525,9 @@ export async function init(app, params) {
       ["cleanup list", () => cleanup("normal")],
       ["cleanup: nothing to close", () => cleanup("none")],
       ["cleanup: can't close any", () => cleanup("blocked")],
+      ["cleanup: NFT collector", () => cleanup("nfts")],
+      ["cleanup: only held NFTs", () => cleanup("nftsHeldOnly")],
+      ["cleanup: game wallet (collectibles)", () => cleanup("collectibles")],
       ["cleanup: big wallet", () => cleanup("many")],
       ["cleanup: burn section open", async () => { await cleanup("normal"); const rc = app.state.rc; rc.burnOpen = true; rc.built = null; app.renderCleanup(); }],
       ["cleanup loading", () => cleanup("slow")],

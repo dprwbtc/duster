@@ -21,6 +21,10 @@ export function metadataPda(mint: PublicKey): PublicKey {
 
 /** Reads `count` borsh strings (u32 little-endian length, then UTF-8) starting at `off`. Null if any is malformed. */
 function borshStrings(data: Buffer, off: number, count: number): string[] | null {
+  return borshStringsAt(data, off, count)?.strings ?? null;
+}
+/** Same, and where the last string ends, so a parser can carry on reading the fields after it. */
+function borshStringsAt(data: Buffer, off: number, count: number): { strings: string[]; end: number } | null {
   const out: string[] = [];
   for (let i = 0; i < count; i++) {
     if (off + 4 > data.length) return null;
@@ -32,7 +36,7 @@ function borshStrings(data: Buffer, off: number, count: number): string[] | null
     out.push(data.subarray(off, off + len).toString("utf8").replace(/[\u0000-\u001f\u007f]/g, "").trim());
     off += len;
   }
-  return out;
+  return { strings: out, end: off };
 }
 
 const toMeta = (s: string[] | null): OnchainMeta | null =>
@@ -43,6 +47,76 @@ export function parseMetaplex(data: Buffer, mint: PublicKey): OnchainMeta | null
   if (data.length < 65 || data[0] !== METAPLEX_METADATA_V1) return null;
   if (!data.subarray(33, 65).equals(mint.toBuffer())) return null;
   return toMeta(borshStrings(data, 65, 3));
+}
+
+/** Metaplex TokenStandard. Everything but Fungible (2) means "not an ordinary token". */
+export const TokenStandard = { NonFungible: 0, FungibleAsset: 1, Fungible: 2, NonFungibleEdition: 3, ProgrammableNonFungible: 4, ProgrammableNonFungibleEdition: 5 } as const;
+
+/** The Metaplex fields after `uri` that say what kind of asset a mint is. Null where the account doesn't have them. */
+export interface MetaplexDetails {
+  sellerFeeBps: number | null;
+  creators: { address: string; verified: boolean; share: number }[] | null;
+  primarySaleHappened: boolean | null;
+  isMutable: boolean | null;
+  editionNonce: number | null;
+  tokenStandard: number | null;
+  collection: { verified: boolean; key: string } | null;
+  /** True once token_standard was reached (read as a value or None). Older accounts end, or turn to padding, before. */
+  complete: boolean;
+}
+
+/**
+ * The whole Metaplex Metadata account as far as it goes: name, symbol, uri, then seller_fee_basis_points u16,
+ * creators Option<Vec<{address 32, verified u8, share u8}>>, primary_sale_happened u8, is_mutable u8,
+ * edition_nonce Option<u8>, token_standard Option<u8>, collection Option<{verified u8, key 32}>. Accounts written by
+ * older program versions stop early (or are zero-padded, which reads as None), so every field past `uri` is optional,
+ * and anything that doesn't parse ends the read there instead of guessing. Null only if the header or strings are bad.
+ */
+export function parseMetaplexFull(data: Buffer, mint: PublicKey): { meta: OnchainMeta; details: MetaplexDetails } | null {
+  if (data.length < 65 || data[0] !== METAPLEX_METADATA_V1) return null;
+  if (!data.subarray(33, 65).equals(mint.toBuffer())) return null;
+  const s = borshStringsAt(data, 65, 3);
+  if (!s) return null;
+  const d: MetaplexDetails = { sellerFeeBps: null, creators: null, primarySaleHappened: null, isMutable: null, editionNonce: null, tokenStandard: null, collection: null, complete: false };
+  let off = s.end;
+  const left = (n: number) => off + n <= data.length;
+  // an Option tag is 0 (None) or 1 (Some); anything else means we've walked off the real data
+  const option = (): boolean | null => (left(1) && data[off] <= 1 ? data[off++] === 1 : null);
+  read: {
+    if (!left(2)) break read;
+    d.sellerFeeBps = data.readUInt16LE(off);
+    off += 2;
+    const hasCreators = option();
+    if (hasCreators === null) break read;
+    if (hasCreators) {
+      if (!left(4)) break read;
+      const n = data.readUInt32LE(off);
+      off += 4;
+      if (n > 10 || !left(n * 34)) break read; // Metaplex allows 5 creators
+      d.creators = [];
+      for (let i = 0; i < n; i++, off += 34)
+        d.creators.push({ address: new PublicKey(data.subarray(off, off + 32)).toBase58(), verified: data[off + 32] === 1, share: data[off + 33] });
+    }
+    if (!left(2)) break read;
+    d.primarySaleHappened = data[off++] === 1;
+    d.isMutable = data[off++] === 1;
+    const hasNonce = option();
+    if (hasNonce === null) break read;
+    if (hasNonce) {
+      if (!left(1)) break read;
+      d.editionNonce = data[off++];
+    }
+    const hasStandard = option();
+    if (hasStandard === null) break read;
+    if (hasStandard) {
+      if (!left(1) || data[off] > 5) break read; // an unknown standard is left unknown, never guessed
+      d.tokenStandard = data[off++];
+    }
+    d.complete = true;
+    const hasCollection = option();
+    if (hasCollection && left(33)) d.collection = { verified: data[off] === 1, key: new PublicKey(data.subarray(off + 1, off + 33)).toBase58() };
+  }
+  return { meta: toMeta(s.strings)!, details: d };
 }
 
 /** Token-2022 TokenMetadata extension: update_authority 32, mint 32, then name, symbol, uri (same encoding). */
@@ -64,6 +138,10 @@ export const isTokenProgram = (owner: PublicKey) => owner.equals(TOKEN_PROGRAM_I
 const META_TTL_MS = 60 * 60_000;
 const MISS_TTL_MS = 10 * 60_000;
 const memo = new Map<string, { at: number; meta: OnchainMeta | null; isMint: boolean }>();
+/** Lets another reader that already fetched a mint's metadata (the NFT classifier) save readMeta the RPC call. */
+export function rememberMeta(mint: string, meta: OnchainMeta | null, isMint: boolean) {
+  remember(mint, meta, isMint);
+}
 function remember(mint: string, meta: OnchainMeta | null, isMint: boolean) {
   if (memo.size > 5_000) for (const k of [...memo.keys()].slice(0, 1_000)) memo.delete(k);
   memo.set(mint, { at: Date.now(), meta, isMint });

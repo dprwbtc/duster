@@ -685,6 +685,12 @@ button.flag:hover { color: var(--text); box-shadow: inset 0 0 0 1px rgb(242 179 
 .hrow .sym { display: block; font-size: 13px; text-decoration: line-through; text-decoration-color: rgb(149 139 180 / .5); color: var(--lav-2); }
 .hrow .who-sub { white-space: normal; }
 .hrow .reveal { padding: 2px 0; font-size: 12px; }
+.left-alone { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 0 2px; }
+.left-alone .i { flex: none; color: var(--lav); }
+.rc-nft { margin-top: 18px; }
+.rc-nft .list-label { display: flex; justify-content: space-between; gap: 12px; }
+.rc-nft .hint { margin: 2px 0 8px; }
+.rc-nft .rows { border-top: 1px solid var(--hair-2); }
 .kept { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; margin-top: 14px; padding: 12px 14px; border-radius: 12px; font-size: 13px; color: var(--lav-2); box-shadow: inset 0 0 0 1px rgb(232 158 164 / .22); background: rgb(232 158 164 / .05); }
 .kept .tok-ico { width: 30px; height: 30px; font-size: 12px; }
 .kept-txt { flex: 1 1 220px; min-width: 0; }

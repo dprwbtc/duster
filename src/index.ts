@@ -6,6 +6,7 @@ import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { getPrices } from "./jupiter.js";
 import { getHoldings } from "./wallet.js";
 import { planSwaps } from "./plan.js";
+import { classifyMints, hintsFrom } from "./nft.js";
 
 const SOL = "So11111111111111111111111111111111111111112";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -60,8 +61,14 @@ console.log(`Wallet ${ownerKey.toBase58()}  →  ${outMint}  (${a.execute ? "LIV
 
 // 1. Find dust: priced tokens worth between min-usd and max-usd.
 // The burn token is never sold for the fee (the website hides it too).
-const holdings = (await getHoldings(connection, ownerKey)).filter((h) => h.mint !== outMint && h.mint !== SOL && h.mint !== fee?.burnMint);
-const prices = await getPrices(apiKey, [...new Set([...holdings.map((h) => h.mint), outMint])]);
+// NFTs (and SFTs, editions, pNFTs) are never sold, like on the website: classified on-chain and left alone. A
+// decimals-0 collectible with no NFT marker is a token only if Jupiter prices it (checked below with the rest).
+const all = (await getHoldings(connection, ownerKey)).filter((h) => h.mint !== outMint && h.mint !== SOL && h.mint !== fee?.burnMint);
+const nfts = await classifyMints(connection, all.map((h) => h.mint), hintsFrom(all));
+const maybeTokens = all.filter((h) => { const c = nfts.get(h.mint); return !!c && (!c.nft || !!c.tokenIfPriced); });
+const prices = await getPrices(apiKey, [...new Set([...maybeTokens.map((h) => h.mint), outMint])]);
+const holdings = maybeTokens.filter((h) => !nfts.get(h.mint)!.nft || typeof prices[h.mint]?.usdPrice === "number");
+if (holdings.length < all.length) console.log(`${all.length - holdings.length} NFT(s) and collectible(s) in this wallet are left alone.`);
 const outInfo = prices[outMint];
 if (!outInfo) throw new Error("No price for output token; can't sanity-check swaps");
 
@@ -71,7 +78,7 @@ for (const h of holdings) {
   if (exclude.has(h.mint)) continue;
   if (only.size && !only.has(h.mint)) continue;
   if (h.frozen) skipped.push({ mint: h.mint, reason: "account frozen" });
-  else if (!p) skipped.push({ mint: h.mint, reason: "no reliable price (left alone)" });
+  else if (!p || typeof p.usdPrice !== "number") skipped.push({ mint: h.mint, reason: "no reliable price (left alone)" }); // Jupiter may list a mint without a price
   else if (h.uiAmount * p.usdPrice > maxUsd) continue; // not dust
   else if (h.uiAmount * p.usdPrice < minUsd) skipped.push({ mint: h.mint, reason: "below --min-usd" });
   else candidates.push({ h, usd: h.uiAmount * p.usdPrice });

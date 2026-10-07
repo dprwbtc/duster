@@ -7,6 +7,7 @@ import { JUP_RPS, getPrices, jupStats, searchTokens, type PriceInfo, type TokenM
 import { getHoldings, getTokenAccounts, parseTokenAccount, type TokenAccount } from "./wallet.js";
 import { feeApplies, planSwaps, type FeeConfig } from "./plan.js";
 import { readMeta } from "./meta.js";
+import { classifyMints, hintsFrom, isNftKind, kindCounts, type MintClass, type NftKind } from "./nft.js";
 import { RpcUnavailable, tokenImage } from "./imgproxy.js";
 import { planReclaim, type ReclaimItem } from "./reclaim.js";
 import { TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
@@ -19,6 +20,9 @@ const MAX_TXS_PER_SEND = 30; // one transaction per token, so this matches MAX_T
 const MAX_TX_BYTES = 1232;
 const MAX_RECLAIM_ACCOUNTS = 400; // per /api/reclaim request; about 20 closes fit in one transaction
 const BURN_MAX_USD = 1; // "burn & close" is only for dust worth less than this (or with no price at all)
+const NOT_SOLD = "NFTs aren't sold here";
+const NOT_SOLD_COLLECTIBLE = "collectibles aren't sold here";
+const UNSURE = "couldn't check whether it's an NFT right now; try again";
 
 class HttpError extends Error {
   constructor(public status: number, msg: string) {
@@ -130,19 +134,42 @@ function holdingsWithValue(apiKey: string, connection: Connection, owner: Public
   return rows;
 }
 
+/**
+ * Whether a holding is left alone as an NFT or collectible, from the classifier and Jupiter's price: a decimals-0
+ * mint with no NFT marker (`tokenIfPriced`) is a token only when Jupiter prices it. No classification at all is
+ * treated as an unreadable NFT.
+ */
+function leftAlone(c: MintClass | undefined, price: number | null | undefined): { nft: boolean; kind: NftKind | null; unsure: boolean } {
+  if (!c) return { nft: true, kind: "nft", unsure: true };
+  if (!c.nft || (c.tokenIfPriced && typeof price === "number")) return { nft: false, kind: null, unsure: false };
+  return { nft: true, kind: c.kind ?? "nft", unsure: !!c.unsure };
+}
+
 async function readHoldingsWithValue(apiKey: string, connection: Connection, owner: PublicKey) {
   const holdings = (await getHoldings(connection, owner)).filter((h) => h.mint !== SOL);
   const mints = [...new Set(holdings.map((h) => h.mint))];
-  const [prices, meta] = await Promise.all([getPrices(apiKey, mints), metaFor(apiKey, mints)]);
+  // NFTs are never sold, burned or listed as tokens, so they don't spend Jupiter quota either (RPC only, cached).
+  // Collectibles with no NFT marker ride along in the same price batch: the price is what says "token" for them.
+  const cls = await classifyMints(connection, mints, hintsFrom(holdings));
+  const priceable = mints.filter((m) => { const c = cls.get(m); return !!c && (!c.nft || !!c.tokenIfPriced); });
+  const prices = await getPrices(apiKey, priceable);
+  const tokens = mints.filter((m) => !leftAlone(cls.get(m), prices[m]?.usdPrice).nft);
+  const meta = await metaFor(apiKey, tokens);
   return holdings.map((h) => {
-    const price = prices[h.mint]?.usdPrice ?? null;
-    const m = meta.get(h.mint);
+    const c = cls.get(h.mint);
+    const la = leftAlone(c, prices[h.mint]?.usdPrice);
+    const nft = la.nft;
+    const price = nft ? null : prices[h.mint]?.usdPrice ?? null;
+    const m = nft ? undefined : meta.get(h.mint);
     return {
       h,
+      nft,
+      nftKind: la.kind,
+      nftUnsure: la.unsure,
       price,
       usd: price === null ? null : h.uiAmount * price,
-      symbol: m?.symbol ?? null,
-      name: m?.name ?? null,
+      symbol: m?.symbol ?? (nft ? c?.meta?.symbol || null : null),
+      name: m?.name ?? (nft ? c?.meta?.name || null : null),
       icon: m?.icon ?? null,
       verified: !!m?.isVerified,
     };
@@ -193,7 +220,9 @@ export const holdings = wrap(async (req) => {
   const { apiKey, connection } = env();
   const owner = pubkey(new URL(req.url).searchParams.get("owner"), "owner");
   const rows = await holdingsWithValue(apiKey, connection, owner, { fresh: true });
-  return rows.map(({ h, ...r }) => ({ mint: h.mint, amount: h.uiAmount, frozen: h.frozen, ...r }));
+  // NFT and collectible rows come back marked ({ nft: true, nftKind }) so the page can say how many it leaves alone,
+  // never as tokens; `nftUnsure` when the chain couldn't be read just now (left alone too, but not called an NFT)
+  return rows.map(({ h, nftKind, nftUnsure, ...r }) => ({ mint: h.mint, amount: h.uiAmount, frozen: h.frozen, ...r, ...(r.nft ? { nftKind, ...(nftUnsure ? { nftUnsure } : {}) } : {}) }));
 });
 
 export const tokenSearch = wrap(async (req) => {
@@ -229,17 +258,36 @@ export const plan = wrap(async (req) => {
   const maxLossPct = Number(b.maxLossPct);
   const maxLoss = Math.min(Math.max(Number.isFinite(maxLossPct) ? maxLossPct : 10, 0), 50) / 100;
   const { apiKey, connection } = env();
+  const skipped: { mint: string; reason: string }[] = [];
+
+  // NFTs are refused before anything else, and before any Jupiter call (RPC only, and usually cached by /api/holdings).
+  // The default outputs are known tokens and skip the read. A mint the chain says is certainly an NFT goes now; one
+  // that couldn't be read (no token-account decimals to go on yet) or whose answer depends on its price is settled
+  // below, by the holdings read, which classifies with the account's decimals and prices collectibles.
+  const fee = feeConfig();
+  const knownTokens = new Set([SOL, USDC, USDT, ...(fee ? [fee.burnMint] : [])]);
+  const cls = await classifyMints(connection, [...wanted, ...(knownTokens.has(outMint) ? [] : [outMint])]);
+  for (const mint of wanted) {
+    const c = cls.get(mint);
+    if (c?.nft && !c.unsure && !c.tokenIfPriced) (skipped.push({ mint, reason: isNftKind(c.kind) ? NOT_SOLD : NOT_SOLD_COLLECTIBLE }), wanted.delete(mint));
+  }
+  const oc = cls.get(outMint);
+  if (oc?.nft && oc.unsure) throw new HttpError(503, "Couldn't check the token you're swapping into just now. Try again in a moment.");
+  if (oc?.nft && !oc.tokenIfPriced) throw new HttpError(400, `That's ${isNftKind(oc.kind) ? "an NFT" : "a collectible"}, not a token. Pick a token to swap into.`);
+  if (!wanted.size) return { skipped, feeApplied: false, burnMint: null, outPrice: null, txs: [] };
 
   // Re-read balances and prices server-side; never trust amounts from the browser.
   const rows = await holdingsWithValue(apiKey, connection, owner);
   const outPrice = await outPriceFor(apiKey, outMint);
+  // an output collectible (decimals 0, no NFT marker) is a token only with a price, and this is where it's told
+  if (!outPrice && oc?.tokenIfPriced) throw new HttpError(400, "That's a collectible, not a token. Pick a token to swap into.");
   if (!outPrice) throw new HttpError(400, "The token you're swapping into has no reliable price, so swaps can't be checked. Pick another.");
 
-  const skipped: { mint: string; reason: string }[] = [];
   const items: { h: (typeof rows)[number]["h"]; usd: number }[] = [];
   for (const mint of wanted) {
     const r = rows.find((x) => x.h.mint === mint);
     if (!r) skipped.push({ mint, reason: "not in wallet" });
+    else if (r.nft) skipped.push({ mint, reason: r.nftUnsure ? UNSURE : isNftKind(r.nftKind) ? NOT_SOLD : NOT_SOLD_COLLECTIBLE });
     else if (r.h.frozen) skipped.push({ mint, reason: "account frozen" });
     else if (r.usd === null) skipped.push({ mint, reason: "no reliable price" });
     else items.push({ h: r.h, usd: r.usd });
@@ -258,7 +306,7 @@ export const plan = wrap(async (req) => {
     maxAccounts: 64,
     maxLoss,
     closeSource: b.closeAccounts !== false,
-    fee: feeConfig(),
+    fee,
   }));
   console.log(JSON.stringify({ plan: { tokens: items.length, txs: result.batches.length, skipped: result.skipped.length, ms: Date.now() - t0, out: outMint.slice(0, 4), jup: stats } }));
   // Jupiter/RPC error text can be noisy or leak details; keep reasons short and generic.
@@ -269,7 +317,6 @@ export const plan = wrap(async (req) => {
       reason: s.reason.startsWith("no route") ? (/\b429\b/.test(s.reason) ? "quote service busy; try again shortly" : "no route found") : s.reason,
     })),
   );
-  const fee = feeConfig();
   const feeApplied = feeApplies(fee, outMint);
   return {
     skipped,
@@ -489,13 +536,18 @@ function closeCheck(a: TokenAccount, owner: string): { ok: true } | { ok: false;
 }
 
 /**
- * Why an account that still holds tokens may never be burned, whatever its price says, or null. Jupiter has no
- * price for NFTs and SFTs (decimals 0), so "no price" there means "value unknown", not "worthless". The burn
- * token is the project's own: it's never offered for burning here (the swaps' fee burns it on purpose).
+ * Why an account that still holds tokens may never be burned, whatever its price says, or null. NFTs and collectibles
+ * (by the on-chain classifier in nft.ts) never are. Nor is anything else with no decimals: Jupiter has no price for
+ * most of those, so "no price" there means "value unknown", not "worthless" (an old SFT can look exactly like a
+ * 0-decimal coin). The burn token is the project's own: it's never offered for burning here (the swaps' fee burns it
+ * on purpose).
  */
-function burnBlock(a: TokenAccount): string | null {
+function burnBlock(a: TokenAccount, c: MintClass | undefined): string | null {
   if (a.native) return "wrapped SOL is closed (unwrapped), never burned";
-  if (a.decimals === 0) return "it looks like an NFT or collectible (no decimals), so it's never burned here";
+  // no classification at all, or an unreadable mint, is treated like an NFT: burning can't be undone
+  if (!c || (c.nft && (c.unsure || isNftKind(c.kind)))) return "it's an NFT, and NFTs are never burned here";
+  if (c.nft) return "it's a collectible, and collectibles are never burned here";
+  if (a.decimals === 0) return "it has no decimals, so its value can't be told; it's never burned here";
   const burnMint = process.env.BURN_TOKEN_MINT?.trim();
   if (burnMint && a.mint === burnMint) return "that's the burn token; keep it or sell it instead";
   return null;
@@ -513,7 +565,9 @@ export const accounts = wrap(async (req) => {
   const ownerStr = owner.toBase58();
   const list = await getTokenAccounts(connection, owner);
   const program = new Map(list.map((a) => [a.mint, a.tokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? ("token-2022" as const) : ("token" as const)]));
-  const held = withPrices ? [...new Set(list.filter((a) => a.rawAmount > 0n && !burnBlock(a)).map((a) => a.mint))] : [];
+  // RPC only; it also reads the names, so readMeta below answers from memory for every mint it could read
+  const cls = await classifyMints(connection, [...program.keys()], hintsFrom(list));
+  const held = withPrices ? [...new Set(list.filter((a) => a.rawAmount > 0n && !burnBlock(a, cls.get(a.mint))).map((a) => a.mint))] : [];
   let priceError = false;
   const [prices, meta, jup] = await Promise.all([
     pricesFor(apiKey, owner, held).catch((e) => (console.error(e), (priceError = true), new Map<string, number | null>())),
@@ -524,8 +578,15 @@ export const accounts = wrap(async (req) => {
   const rows = list.map((a) => {
     const chk = closeCheck(a, ownerStr);
     const empty = a.rawAmount === 0n;
+    const c = cls.get(a.mint);
+    // An account holding an NFT or collectible is never closable or burnable. An EMPTY account whose mint is one holds
+    // nothing (it already left), so closing it only returns the rent: it stays closable, in its own group on the page.
+    // A collectible with no NFT marker (`tokenIfPriced`) may turn out to be a priced 0-decimal coin; this read has no
+    // prices, so the page settles that from its pockets list. `nftUnsure`: the chain couldn't be read just now.
+    const nft = !c || c.nft;
+    const nftUnsure = nft && (!c || !!c.unsure);
     // could be burned and closed, value permitting (the page shows the burn section only for these)
-    const burnCandidate = chk.ok && !empty && !burnBlock(a);
+    const burnCandidate = chk.ok && !empty && !burnBlock(a, c);
     const price = withPrices && burnCandidate ? prices.get(a.mint) ?? null : null;
     const usd = price === null ? null : a.uiAmount * price;
     // Burning is irreversible, so it's offered only when we know the value: below $1, or no price anywhere.
@@ -546,18 +607,24 @@ export const accounts = wrap(async (req) => {
       closeAuthority: a.closeAuthority,
       // wrapped SOL can always be closed: closing just unwraps it into the wallet
       closable: chk.ok && (empty || a.native),
-      reason: !chk.ok ? chk.reason : empty || a.native ? undefined : "has balance",
+      reason: !chk.ok ? chk.reason : empty || a.native ? undefined : !nft ? "has balance" : nftUnsure || isNftKind(c?.kind) ? "holds an NFT" : "holds a collectible",
       burnable,
       burnCandidate,
       // why a non-empty account isn't a burn candidate even though it could be closed (NFT, burn token)
-      burnBlock: chk.ok && !empty && !a.native ? burnBlock(a) ?? undefined : undefined,
+      burnBlock: chk.ok && !empty && !a.native ? burnBlock(a, c) ?? undefined : undefined,
+      nft,
+      nftKind: nft ? c?.kind ?? "nft" : null,
+      ...(nftUnsure ? { nftUnsure: true } : {}),
+      ...(nft && c?.tokenIfPriced ? { tokenIfPriced: true } : {}),
       withheld: a.withheld > 0n,
-      symbol: j?.symbol || m?.symbol || null,
-      name: j?.name || m?.name || null,
+      symbol: j?.symbol || m?.symbol || c?.meta?.symbol || null,
+      name: j?.name || m?.name || c?.meta?.name || null,
       verified: !!j?.verified,
       usd,
     };
   });
+  const nfts = rows.filter((r) => r.nft);
+  if (nfts.length) console.log(JSON.stringify({ accounts: { total: rows.length, nft: nfts.length, nftEmpty: nfts.filter((r) => r.amount === "0").length, kinds: kindCounts([...cls.values()]) } }));
   return { accounts: rows, priced: withPrices, priceError };
 });
 
@@ -596,14 +663,23 @@ export const reclaim = wrap(async (req) => {
     const chk = closeCheck(acct, ownerStr);
     if (!chk.ok) return skipped.push({ address: w.a, reason: chk.reason });
     if (!w.burn) {
-      if (acct.rawAmount > 0n && !acct.native) return skipped.push({ address: w.a, reason: "it still holds tokens" });
+      // only empty accounts close (an NFT account included: one that still holds its NFT is never closed)
+      if (acct.rawAmount > 0n && !acct.native) return skipped.push({ address: w.a, reason: acct.decimals === 0 ? "it isn't empty" : "it still holds tokens" });
       return items.push({ acct, action: "close" });
     }
     if (acct.rawAmount === 0n) return items.push({ acct, action: "close" }); // nothing left to burn: a plain close
-    const block = burnBlock(acct);
-    if (block) return skipped.push({ address: w.a, reason: block });
+    if (acct.native) return skipped.push({ address: w.a, reason: "wrapped SOL is closed (unwrapped), never burned" });
     burnCandidates.push({ w, acct });
   });
+  // Every burn is checked against the NFT classifier (RPC only), whatever the page sent: NFTs are never burned.
+  if (burnCandidates.length) {
+    const cls = await classifyMints(connection, burnCandidates.map((c) => c.acct.mint), hintsFrom(burnCandidates.map((c) => c.acct)));
+    for (let i = burnCandidates.length - 1; i >= 0; i--) {
+      const { w, acct } = burnCandidates[i];
+      const block = burnBlock(acct, cls.get(acct.mint));
+      if (block) (skipped.push({ address: w.a, reason: block }), burnCandidates.splice(i, 1));
+    }
+  }
   if (burnCandidates.length) {
     let prices: Map<string, number | null> | null = null;
     try {

@@ -124,7 +124,7 @@ const state = {
   scene: "title", epoch: 0, busy: null,
   fee: undefined, feeErr: false, prices: {},
   wallets: [], wallet: null, account: null, connecting: false, booted: false,
-  rows: [], selected: new Set(), loading: false, loadError: null, cooldownUntil: 0,
+  rows: [], nftCount: 0, collectibleCount: 0, uncheckedCount: 0, selected: new Set(), loading: false, loadError: null, cooldownUntil: 0,
   preset: 2, range: { min: 0, max: 2 }, query: "", includeBurn: false,
   out: DEFAULT_OUTS[0], customAck: false,
   set: { ...DEFAULT_SET, ...sanitizeSet(store.get("set", {})) },
@@ -139,7 +139,7 @@ const state = {
 function rcFresh() {
   return { accounts: null, owner: null, loading: false, error: null, at: 0, seq: 0, priced: false, priceError: false, pricing: false, pricingError: null,
     sel: new Set(), burnSel: new Set(), burnAck: false, burnOpen: false, plan: null, building: null, notice: null, resetSel: false, pendingSel: null, built: null, inputs: new Map(),
-    showN: RC_PAGE, from: null };
+    showN: RC_PAGE, nftShowN: RC_PAGE, from: null };
 }
 // Dev/QA helpers, only ever loaded on localhost (see boot). Whether dev mode was asked for is decided before
 // any wallet can register, so a real wallet that registers while dev.js is still loading can't slip past its filter.
@@ -171,6 +171,8 @@ const burnSym = () => (fee() ? "$" + fee().burnToken.symbol : "the burn token");
 const outPrice = (o = state.out) => (typeof o.usdPrice === "number" ? o.usdPrice : state.prices[o.id] ?? null);
 
 const rowBy = (mint) => state.rows.find((r) => r.mint === mint);
+// the server's non-fungible kinds a person would call an NFT; "sft" and "collectible" are called collectibles
+const isNftKind = (k) => k === "nft" || k === "pnft" || k === "edition" || k === "t22-nft";
 const isBurnRow = (r) => !!burnId() && r.mint === burnId();
 const burnHidden = (r) => isBurnRow(r) && !state.includeBurn;
 const selectable = (r) => r.usd != null && !r.frozen && r.mint !== state.out.id && !burnHidden(r);
@@ -668,7 +670,7 @@ function disconnect({ quiet = false } = {}) {
   try { state.wallet?.features["standard:disconnect"]?.disconnect(); } catch {}
   state.walletOff?.(); state.walletOff = null;
   store.set("wallet", null);
-  state.wallet = state.account = null; state.rows = []; state.selected.clear(); state.plan = null; state.run = null; state.building = null; state.busy = null;
+  state.wallet = state.account = null; state.rows = []; state.nftCount = state.collectibleCount = state.uncheckedCount = 0; state.selected.clear(); state.plan = null; state.run = null; state.building = null; state.busy = null;
   state.pendingAccounts = null; state.includeBurn = false; state.stale = false;
   state.rc = rcFresh(); state.rowsFor = null; state.intent = null;
   for (const el of rowEls.values()) el.remove(); rowEls.clear();
@@ -904,7 +906,7 @@ async function loadHoldings({ silent = false } = {}) {
   const ep = silent ? state.epoch : ++state.epoch;
   const addr = state.account.address;
   if (!silent) {
-    state.loading = true; state.loadError = null; state.rows = []; state.selected.clear(); state.plan = null;
+    state.loading = true; state.loadError = null; state.rows = []; state.nftCount = state.collectibleCount = state.uncheckedCount = 0; state.selected.clear(); state.plan = null;
     renderPockets();
     setPose(sceneMascot("pockets"), 12, { mode: "wiggle" });
     // the empty-pockets line and card read every account, empty ones too. RPC only (no prices, so no Jupiter
@@ -927,7 +929,14 @@ async function loadHoldings({ silent = false } = {}) {
   if ((!silent && ep !== state.epoch) || state.account?.address !== addr) return;
   state.loading = false;
   state.rowsFor = addr;
-  state.rows = rows.filter((r) => r && typeof r.mint === "string").map((r) => ({
+  // NFTs and collectibles never become rows: not sold, not burned, not called tokens. Only how many there are is kept,
+  // for one line. Ones the server couldn't check just now are left out too, and counted apart (not called NFTs).
+  const alone = rows.filter((r) => r && r.nft === true && typeof r.mint === "string");
+  const count = (f) => new Set(alone.filter(f).map((r) => r.mint)).size;
+  state.uncheckedCount = count((r) => r.nftUnsure === true);
+  state.nftCount = count((r) => r.nftUnsure !== true && isNftKind(r.nftKind));
+  state.collectibleCount = count((r) => r.nftUnsure !== true && !isNftKind(r.nftKind));
+  state.rows = rows.filter((r) => r && typeof r.mint === "string" && r.nft !== true).map((r) => ({
     mint: r.mint, amount: Number(r.amount) || 0, frozen: !!r.frozen,
     usd: typeof r.usd === "number" && Number.isFinite(r.usd) ? r.usd : null,
     symbol: typeof r.symbol === "string" ? r.symbol.slice(0, 32) : null,
@@ -1152,6 +1161,9 @@ function renderPockets({ stagger = false } = {}) {
     $("#pkFacts").textContent = state.rows.length
       ? `Nothing here has a reliable price${unpriced ? ` (${plural(unpriced, "token")} without one, listed below)` : ""}, so there’s nothing Duster can sell safely.`
       : "No tokens besides SOL, so there’s nothing to dust.";
+    // the left-alone line sits below the card (under the bar on a phone), so the facts say it first
+    const alone = (state.nftCount || 0) + (state.collectibleCount || 0);
+    if (alone) $("#pkFacts").textContent += ` ${leftAlonePhrase(state.nftCount || 0, state.collectibleCount || 0)} ${alone === 1 ? "is" : "are"} left alone.`;
     const rent = rcEmptiesMine();
     if (rent.length) $("#pkFacts").textContent += ` ${plural(rent.length, "empty account")} still ${rent.length === 1 ? "holds" : "hold"} about ${solAmt(rent.reduce((a, x) => a + x.rentLamports, 0))} SOL of rent you can get back.`;
     // with rent on offer, the bar's one action is "reclaim"; the card doesn't repeat it
@@ -1170,8 +1182,25 @@ function renderPockets({ stagger = false } = {}) {
   renderPocketsMeta(); renderAside(); renderBar();
   requestAnimationFrame(movePresetThumb);
 }
+// "3 NFTs in this wallet are left alone": no rows, no selection, just so nobody wonders where they went. Collectibles
+// (SFTs, game items, 0-decimal mints with no market price) are left alone the same way, and named for what they are.
+const leftAlonePhrase = (nfts, coll) => [nfts > 0 && plural(nfts, "NFT"), coll > 0 && plural(coll, "collectible")].filter(Boolean).join(" and ");
+const leftAloneThem = (nfts, coll) => (coll ? (nfts ? "NFTs or collectibles" : "collectibles") : "NFTs");
+function uncheckedText(n) {
+  return `${plural(n, "item")} couldn’t be checked just now, so ${n === 1 ? "it’s" : "they’re"} left out too.`;
+}
+function leftAloneLine(el, nfts, coll, unchecked) {
+  el.hidden = !(nfts || coll || unchecked);
+  if (el.hidden) return;
+  const n = nfts + coll;
+  fill(el, icon("info", "i i-sm"), h("span", {},
+    n ? `${leftAlonePhrase(nfts, coll)} in this wallet ${n === 1 ? "is" : "are"} left alone. Duster never sells or burns ${leftAloneThem(nfts, coll)}.` : "",
+    unchecked ? [n ? " " : "", uncheckedText(unchecked), " ", h("button", { class: "btn-text sm", type: "button", onclick: () => loadHoldings() }, "check again")] : ""));
+}
 function renderPocketsMeta() {
-  if (state.loading) { $("#hiddenList").hidden = true; $("#keptLine").hidden = true; return; }
+  if (state.loading) { $("#hiddenList").hidden = true; $("#keptLine").hidden = true; $("#nftLine").hidden = true; return; }
+  if (state.loadError) leftAloneLine($("#nftLine"), 0, 0, 0);
+  else leftAloneLine($("#nftLine"), state.nftCount || 0, state.collectibleCount || 0, state.uncheckedCount || 0);
   const list = shown(), selShown = list.filter((r) => state.selected.has(r.mint)).length, selectableShown = list.filter(selectable);
   const all = $("#selAll");
   all.checked = selectableShown.length > 0 && selShown === selectableShown.length;
@@ -1592,6 +1621,9 @@ function humanSkip(s, p) {
   if (r === "account frozen") return { why: "This token account is frozen by its issuer, so it can’t be moved." };
   if (r === "no reliable price") return { why: "No reliable price right now, so the swap can’t be checked against the market." };
   if (r === "not in wallet") return { why: "It’s no longer in this wallet." };
+  if (r === "NFTs aren't sold here") return { why: "It’s an NFT, and Duster never sells NFTs." };
+  if (r === "collectibles aren't sold here") return { why: "It’s a collectible with no market price, and Duster never sells those." };
+  if (r.startsWith("couldn't check whether it's an NFT")) return { why: "Couldn’t confirm it isn’t an NFT just now, so it was left out. Nothing was built or signed.", fix: "retry" };
   if (r.startsWith("preview failed: ")) return { why: `Not quoted. ${r.slice(16)}`, fix: "retry" };
   return { why: r.charAt(0).toUpperCase() + r.slice(1) + (/[.]$/.test(r) ? "" : ".") };
 }
@@ -2229,20 +2261,39 @@ const rcList = () => state.rc.accounts || [];
 const rcMine = () => !!state.account && state.rc.owner === state.account.address;
 const rcAcc = (addr) => rcList().find((a) => a.address === addr);
 const rcEmpty = (a) => a.closable && a.amount === "0";
+// NFTs: an account still holding one is never closed or burned, and isn't listed at all (one "left alone" line says
+// how many). An EMPTY account whose mint is an NFT holds nothing (the NFT already left), so it's closable like any
+// empty account, but it's listed in its own group so nobody mistakes it for a token.
+// A collectible with no NFT marker (`tokenIfPriced`: decimals 0, nothing on-chain says NFT) is a 0-decimal coin when
+// Jupiter prices it; the cleanup reads no prices, so the pockets list (same wallet, priced) settles it. Such a coin is
+// held like any token (never burned: it has no decimals). Accounts the server couldn't check (`nftUnsure`) aren't
+// called NFTs: held ones are counted apart, empty ones close with the rest.
+const rcPricedCoin = (a) => a.tokenIfPriced && a.amount !== "0" && state.rowsFor === state.rc.owner && !!rowBy(a.mint);
+const rcNftHeld = (a) => a.nft && !a.nftUnsure && a.amount !== "0" && !rcPricedCoin(a);
+const rcUnsureHeld = (a) => a.nft && a.nftUnsure && a.amount !== "0";
+const rcTokEmpty = (a) => rcEmpty(a) && (!a.nft || a.nftUnsure);
+const rcNftEmpty = (a) => rcEmpty(a) && a.nft && !a.nftUnsure;
 const rcWsol = (a) => a.closable && a.native && a.amount !== "0";
 const rcCandidates = () => rcList().filter((a) => a.closable); // empty ones, plus wrapped SOL (closing unwraps it)
 // "Burn & close": which accounts could be burned, value permitting, is known from the RPC read alone; which ones are
 // actually offered needs prices, and those cost Jupiter quota, so they're read only once the burn section is opened.
 const rcPricedOk = () => state.rc.priced && !state.rc.priceError;
-const rcBurnCands = () => rcList().filter((a) => a.burnCandidate);
-const rcBurnables = () => (rcPricedOk() ? rcList().filter((a) => a.burnable) : []);
+const rcBurnCands = () => rcList().filter((a) => a.burnCandidate && !a.nft);
+const rcBurnables = () => (rcPricedOk() ? rcList().filter((a) => a.burnable && !a.nft) : []);
 // Priced dust under $1 can be picked all at once. Dust with no price has an unknown value (Jupiter has no price for
 // plenty of tokens worth something), so it's listed apart and every one of those is ticked by hand.
 const rcBurnPriced = () => rcBurnables().filter((a) => a.usd != null).sort((a, b) => a.usd - b.usd);
 const rcBurnUnpriced = () => rcBurnables().filter((a) => a.usd == null);
-const rcBlocked = (a) => !a.closable && !a.burnCandidate && a.reason !== "has balance";
-// still holding tokens the cleanup leaves alone: NFTs and the burn token always, and once priced, dust worth $1 or more
-const rcHolding = () => rcList().filter((a) => a.reason === "has balance" && (!a.burnCandidate || (rcPricedOk() && !a.burnable)));
+const rcBlocked = (a) => !a.closable && !a.burnCandidate && a.reason !== "has balance" && !rcNftHeld(a) && !rcUnsureHeld(a) && !rcPricedCoin(a);
+// still holding tokens the cleanup leaves alone: the burn token always, 0-decimal coins, and once priced, dust worth
+// $1 or more
+const rcHolding = () => rcList().filter((a) => rcPricedCoin(a) || (a.reason === "has balance" && !a.nft && (!a.burnCandidate || (rcPricedOk() && !a.burnable))));
+// how many held accounts are left alone as NFTs, as collectibles, and unchecked
+const rcAloneCounts = () => {
+  const held = rcList().filter(rcNftHeld);
+  const nfts = held.filter((a) => isNftKind(a.nftKind)).length;
+  return { nfts, coll: held.length - nfts, unchecked: rcList().filter(rcUnsureHeld).length };
+};
 const rcHasWork = () => rcCandidates().length > 0 || (rcPricedOk() ? rcBurnables().length > 0 : rcBurnCands().length > 0);
 const rcEmptiesMine = () => (rcMine() ? rcList().filter(rcEmpty) : []);
 const rcBack = (a) => (a.native ? a.lamports : a.rentLamports); // closing wrapped SOL also unwraps its balance
@@ -2261,6 +2312,8 @@ function normAccount(a) {
     amount: typeof a.amount === "string" && /^\d{1,30}$/.test(a.amount) ? a.amount : "0", uiAmount: num(a.uiAmount),
     frozen: !!a.frozen, native: !!a.native, rentLamports: num(a.rentLamports), lamports: num(a.lamports),
     closable: !!a.closable, burnable: !!a.burnable, burnCandidate: !!a.burnCandidate, reason: str(a.reason, 80), withheld: !!a.withheld,
+    // the server's classifier says NFT (or SFT, edition, pNFT); never burned, and never listed while it holds one
+    nft: a.nft === true, nftKind: str(a.nftKind, 16), nftUnsure: a.nft === true && a.nftUnsure === true, tokenIfPriced: a.nft === true && a.tokenIfPriced === true,
     symbol: str(a.symbol, 32), name: str(a.name, 64), verified: !!a.verified,
     usd: typeof a.usd === "number" && Number.isFinite(a.usd) ? a.usd : null,
   };
@@ -2330,6 +2383,8 @@ function rcBackfillNames() {
     if (!r.symbol && a?.symbol) { r.symbol = a.symbol; r.name = r.name || a.name; changed = true; }
   }
   if (changed && state.scene === "pockets") renderPocketsMeta();
+  // a collectible the pockets now know as a priced 0-decimal coin moves from "left alone" to "holds tokens"
+  if (state.scene === "cleanup" && !state.busy && state.rc.built && rcList().some((a) => a.tokenIfPriced && a.amount !== "0")) { state.rc.built = null; renderCleanup(); }
 }
 
 /* the empty-pockets line and card in the pockets scene, and the offer on the result */
@@ -2440,31 +2495,37 @@ function drawRcPick() {
     aside.replaceChildren(rcHowCard());
     return;
   }
-  const empties = rcList().filter(rcEmpty), wsol = rcList().filter(rcWsol), burnCands = rcBurnCands();
+  const allEmpty = rcList().filter(rcEmpty), empties = allEmpty.filter(rcTokEmpty), nftEmpties = allEmpty.filter(rcNftEmpty);
+  const wsol = rcList().filter(rcWsol), burnCands = rcBurnCands(), alone = rcAloneCounts(), nftHeld = alone.nfts + alone.coll;
+  // what the empty-NFT group is called: by the kinds in it, never "tokens"
+  const emptyNfts = nftEmpties.filter((a) => isNftKind(a.nftKind)).length, emptyColl = nftEmpties.length - emptyNfts;
+  const emptyWhat = emptyColl ? (emptyNfts ? "NFTs and collectibles" : "collectibles") : "NFTs";
   // Nothing to close, only accounts that still hold something: burning is the only thing left to offer, so the
   // prices are worth reading right away (and if none of it is under $1, this becomes "nothing to close").
   if (!rcCandidates().length && burnCands.length && !rc.priced && !rc.pricing && !rc.pricingError && !state.busy) { rc.burnOpen = true; rcLoadPrices(); }
-  const blocked = rcList().filter(rcBlocked), holding = rcHolding(), lamAll = lamSum(empties);
+  const blocked = rcList().filter(rcBlocked), holding = rcHolding(), lamAll = lamSum(allEmpty);
   if (!rcHasWork()) {
     hero.hidden = true; rc.built = null; rc.inputs.clear(); main.dataset.view = "";
     $("#rc-title").textContent = "no lint here";
     const holds = holding.length === 1 ? "holds" : "hold";
     $("#rcFacts").textContent = blocked.length
-      ? `${plural(blocked.length, "token account")} can’t be closed by this wallet (the reasons are below)${holding.length ? `, and ${plural(holding.length, "other")} still ${holds} something worth keeping or selling` : ""}.`
+      ? `${plural(blocked.length, "account")} can’t be closed by this wallet (the reasons are below)${holding.length ? `, and ${plural(holding.length, "other")} still ${holds} something worth keeping or selling` : ""}.`
       : holding.length ? "Every token account in this wallet still holds something worth keeping or selling, so there’s nothing to close."
+      : nftHeld ? `Every account in this wallet holds ${alone.coll ? (alone.nfts ? "an NFT or a collectible" : "a collectible") : "an NFT"}, and Duster leaves those alone, so there’s nothing to close.`
+      : alone.unchecked ? "Every account in this wallet still holds something, and some couldn’t be checked just now, so there’s nothing to close."
       : "This wallet has no token accounts besides SOL itself, so there’s nothing to close.";
     // the bar carries "back to your dust"; the card only offers what the bar doesn't
     fill(main, h("div", { class: "state-card" }, stateStill(13, "not a speck of lint", blocked.length ? "Dusty found accounts, but this wallet isn’t allowed to close them." : "Dusty turned out every pocket. Empty accounts show up here after you sell or send tokens."),
       h("div", { class: "state-actions" }, h("button", { class: "btn-text sm", type: "button", onclick: () => loadAccounts() }, icon("refresh", "i i-sm"), "check again"))),
-      rcBlockedBox(blocked));
+      rcBlockedBox(blocked), rcLeftAlone(alone));
     aside.replaceChildren();
     return;
   }
   hero.hidden = false; hero.classList.remove("compact", "stale");
   $("#rc-title").textContent = "empty pockets";
   const dollars = solUsd(lamAll);
-  $("#rcFacts").textContent = empties.length
-    ? `${plural(empties.length, "empty token account")} holding about ${solAmt(lamAll)} SOL of rent${dollars ? ` (≈ ${dollars})` : ""}. Closing an account sends its rent back to your wallet. No fee.${empties.length > RC_MAX ? ` Up to ${RC_MAX} per run, so the first ${RC_MAX} are picked; run it again for the rest.` : ""}`
+  $("#rcFacts").textContent = allEmpty.length
+    ? `${plural(allEmpty.length, "empty account")}${!nftEmpties.length ? "" : nftEmpties.length === allEmpty.length ? ` (${allEmpty.length === 1 ? "it’s" : "all"} left over from ${emptyWhat})` : ` (${nftEmpties.length.toLocaleString("en-US")} of them left over from ${emptyWhat})`} holding about ${solAmt(lamAll)} SOL of rent${dollars ? ` (≈ ${dollars})` : ""}. Closing an account sends its rent back to your wallet. No fee.${allEmpty.length > RC_MAX ? ` Up to ${RC_MAX} per run, so the first ${RC_MAX} are picked; run it again for the rest.` : ""}`
     : `No empty token accounts right now.${wsol.length ? " Wrapped SOL can be unwrapped below." : ""}${burnCands.length ? " Leftover dust under $1 can be burned and closed below, if you choose to." : ""}`;
   // Rows are built once per read and patched afterwards, so ticking a box never moves focus or scroll. The review
   // and the build progress replace #rcMain, so coming back from them always rebuilds.
@@ -2475,7 +2536,7 @@ function drawRcPick() {
     all.addEventListener("change", () => {
       if (state.busy) return;
       if (all.checked) { const room = RC_MAX - (rc.burnAck ? rc.burnSel.size : 0) - wsol.filter((a) => rc.sel.has(a.address)).length; rc.sel = new Set([...wsol.filter((a) => rc.sel.has(a.address)).map((a) => a.address), ...rcList().filter(rcEmpty).slice(0, Math.max(0, room)).map((a) => a.address)]); }
-      else for (const a of empties) rc.sel.delete(a.address);
+      else for (const a of allEmpty) rc.sel.delete(a.address);
       syncCleanup();
     });
     const burnAck = h("input", { type: "checkbox", id: "rcBurnAck" });
@@ -2495,28 +2556,49 @@ function drawRcPick() {
     };
     fillList();
     const more = h("button", { class: "btn-ghost sm rc-more", type: "button", id: "rcMore", onclick: () => { if (state.busy) return; rc.showN += 200; fillList(); syncCleanup({ bar: false }); } });
+    // empty accounts left over from NFTs: their own group, paged the same way (a collector's wallet can have hundreds)
+    const nftList = h("div", { class: "rows rc-rows", id: "rcNftList", role: "group", "aria-label": `Empty ${emptyWhat === "NFTs" ? "NFT" : emptyWhat === "collectibles" ? "collectible" : "NFT and collectible"} accounts` });
+    const fillNft = () => {
+      const have = nftList.children.length;
+      nftList.append(...nftEmpties.slice(have, Math.max(have, rc.nftShowN)).map((a, j) => rcRow(a, have + j, "close")));
+    };
+    fillNft();
+    const nftMore = h("button", { class: "btn-ghost sm rc-more", type: "button", id: "rcNftMore", onclick: () => { if (state.busy) return; rc.nftShowN += 200; fillNft(); syncCleanup({ bar: false }); } });
     const big = holding.filter((a) => a.burnCandidate).length, kept = holding.length - big;
     fill(main,
       wsol.length > 0 && h("div", { class: "rc-wsol" },
         h("div", { class: "overline list-label" }, h("span", {}, "wrapped SOL · picked by hand"), h("span", { class: "tl-col" }, "back")),
         h("div", { class: "rows rc-rows", role: "group", "aria-label": "Wrapped SOL" }, wsol.map((a, i) => rcRow(a, i, "close")))),
-      empties.length > 0 && h("div", { class: "tracklist rc-tracklist" },
+      allEmpty.length > 0 && h("div", { class: "tracklist rc-tracklist" },
         h("div", { class: "tl-head" },
           h("label", { class: "tl-all" }, all, h("span", { class: "cb", "aria-hidden": "true" }, icon("spark", "i"), h("i", { class: "dash" })), h("span", { id: "rcAllLabel" })),
-          h("button", { class: "btn-text sm", type: "button", onclick: () => { if (state.busy) return; for (const a of empties) rc.sel.delete(a.address); syncCleanup(); } }, "clear"),
+          h("button", { class: "btn-text sm", type: "button", onclick: () => { if (state.busy) return; for (const a of allEmpty) rc.sel.delete(a.address); syncCleanup(); } }, "clear"),
           h("span", { class: "tl-col" }, "rent back")),
-        list, more),
+        empties.length > 0 && [list, more],
+        nftEmpties.length > 0 && h("div", { class: "rc-nft" },
+          h("div", { class: "overline list-label" }, h("span", {}, `empty ${emptyWhat === "NFTs" ? "NFT" : emptyWhat === "collectibles" ? "collectible" : "NFT & collectible"} accounts · ${nftEmpties.length.toLocaleString("en-US")}`)),
+          h("p", { class: "hint" }, `The ${emptyWhat === "NFTs" ? "NFT" : emptyWhat === "collectibles" ? "collectible" : "NFT or collectible"} already left this wallet; closing returns the rent. Nothing else is touched.`),
+          nftList, nftMore)),
       burnCands.length > 0 && rcBurnBox(burnAck),
       rcBlockedBox(blocked),
       holding.length > 0 && h("p", { class: "hint rc-holding" }, [
         `${plural(holding.length, "other account")} still ${holding.length === 1 ? "holds" : "hold"} tokens the cleanup leaves alone.`,
         big && `${big === holding.length ? (big === 1 ? "It’s" : "They’re") : `${big} ${big === 1 ? "is" : "are"}`} worth $1 or more: sell ${big === 1 ? "it" : "them"} in the pockets, which closes the account too.`,
-        kept && "NFTs and the burn token are never burned here."].filter(Boolean).join(" ")));
+        kept && "The burn token and tokens with no decimals are never burned here."].filter(Boolean).join(" ")),
+      rcLeftAlone(alone));
     rc.built = rc.accounts; main.dataset.view = "pick";
     if (focusAddr) rc.inputs.get(focusAddr)?.focus({ preventScroll: true });
     aside.replaceChildren(rcHowCard());
   }
   syncCleanup({ bar: false });
+}
+// accounts that still hold an NFT or collectible: not listed, not counted as tokens, just one quiet line
+function rcLeftAlone({ nfts, coll, unchecked }) {
+  const n = nfts + coll;
+  return (n > 0 || unchecked > 0) && h("p", { class: "hint left-alone" }, icon("info", "i i-sm"), h("span", {},
+    n ? `${leftAlonePhrase(nfts, coll)} in this wallet ${n === 1 ? "is" : "are"} left alone. Duster never closes, sells or burns an account that holds one.` : "",
+    unchecked ? [n ? " " : "", `${plural(unchecked, "account")} couldn’t be checked just now, so ${unchecked === 1 ? "it’s" : "they’re"} left alone too. `,
+      h("button", { class: "btn-text sm", type: "button", onclick: () => loadAccounts() }, "check again")] : ""));
 }
 function rcBurnBox(burnAck) {
   const rc = state.rc, priced = rcBurnPriced(), unpriced = rcBurnUnpriced();
@@ -2556,6 +2638,10 @@ function rcBurnBox(burnAck) {
   return box;
 }
 function rcBlockedWhy(a) {
+  // an empty NFT account that can't be closed is still an NFT account, never "the token's"
+  const what = !a.nft || a.nftUnsure ? null : isNftKind(a.nftKind) ? "NFT" : "collectible";
+  if (what && (a.frozen || a.reason === "frozen")) return `Empty ${what} account, frozen by its collection’s authority, so it can’t be closed.`;
+  if (what && a.reason === "close authority is someone else") return `Empty ${what} account; another address holds the right to close it, so this wallet can’t.`;
   if (a.frozen || a.reason === "frozen") return "Frozen by the token’s issuer, so it can’t be closed.";
   if (a.reason === "close authority is someone else") return "Another address holds the right to close it, so this wallet can’t.";
   return a.reason ? a.reason.charAt(0).toUpperCase() + a.reason.slice(1) + "." : "Can’t be closed right now.";
@@ -2563,7 +2649,7 @@ function rcBlockedWhy(a) {
 function rcRow(a, i, kind) {
   const rc = state.rc, spam = looksSpam(a), burn = kind === "burn", back = solAmt(rcBack(a));
   const input = h("input", { type: "checkbox", class: "cb-input", "data-addr": a.address, "data-kind": kind,
-    "aria-label": burn ? `Burn and close ${rcLabel(a)}, ${a.usd == null ? "no price, value unknown" : `worth ${usdP(a.usd)}`}, ${back} SOL back` : `Close ${a.native ? "wrapped SOL" : rcLabel(a)}, ${back} SOL back` });
+    "aria-label": burn ? `Burn and close ${rcLabel(a)}, ${a.usd == null ? "no price, value unknown" : `worth ${usdP(a.usd)}`}, ${back} SOL back` : `Close ${a.native ? "wrapped SOL" : a.nft && !a.nftUnsure ? `the empty ${isNftKind(a.nftKind) ? "NFT" : "collectible"} account of ${rcLabel(a)}` : rcLabel(a)}, ${back} SOL back` });
   rc.inputs.set(a.address, input);
   // flags the user can't act on live in the sub-line, so the name keeps the top line to itself on a phone
   const t22 = a.program === "token-2022" ? " · token-2022" : "";
@@ -2571,6 +2657,7 @@ function rcRow(a, i, kind) {
   const sub = burn
     ? [`${amt(a.uiAmount)} left · `, a.usd == null ? h("span", { class: "pinkt" }, "value unknown") : "could be sold instead", t22]
     : a.native ? `unwraps ${solAmt(a.lamports - a.rentLamports)} SOL + rent`
+    : a.nft && !a.nftUnsure ? [`empty · ${isNftKind(a.nftKind) ? "NFT" : "collectible"} already gone`, a.symbol ? [" · ", h("span", { class: "mono" }, short(a.mint))] : "", t22, fees]
     : !a.symbol && !a.name ? ["no name on-chain", t22, fees]
     : [!spam && a.name ? h("span", { class: "nm" }, a.name + " · ") : "", h("span", { class: "mono" }, short(a.mint)), t22, fees];
   const name = spam ? [h("span", { class: "m-hide" }, "name hidden: likely spam"), h("span", { class: "m-show" }, "likely spam")] : a.native ? "wrapped SOL" : rcLabel(a);
@@ -2607,9 +2694,9 @@ function syncCleanup({ bar = true } = {}) {
     all.checked = cap > 0 && on >= cap; all.indeterminate = on > 0 && on < cap; all.disabled = busy || !em.length;
     fill($("#rcAllLabel"), em.length > RC_MAX ? [h("span", { class: "m-hide" }, "select "), `${RC_MAX} of ${n}`] : `select all empty (${n})`);
   }
-  const more = $("#rcMore"), list = $("#rcList");
-  if (more && list) {
-    const shownN = list.children.length, left = em.length - shownN, pickedHidden = em.slice(shownN).filter((a) => rc.sel.has(a.address)).length;
+  for (const [more, list, group] of [[$("#rcMore"), $("#rcList"), em.filter(rcTokEmpty)], [$("#rcNftMore"), $("#rcNftList"), em.filter(rcNftEmpty)]]) {
+    if (!more || !list) continue;
+    const shownN = list.children.length, left = group.length - shownN, pickedHidden = group.slice(shownN).filter((a) => rc.sel.has(a.address)).length;
     more.hidden = left <= 0; more.disabled = busy;
     more.textContent = `show ${Math.min(200, left).toLocaleString("en-US")} more · ${plural(left, "account")} not shown${pickedHidden ? `, ${pickedHidden.toLocaleString("en-US")} of them picked` : ""}`;
   }
@@ -2729,7 +2816,7 @@ function drawRcReview() {
       h("p", { class: "overline" }, "what your wallet will ask"),
       h("h3", {}, `1 prompt · ${plural(n, "transaction")}`),
       h("ul", { class: "ask-list" },
-        h("li", {}, icon("wallet"), h("span", {}, h("b", {}, `${state.wallet?.name || "Your wallet"} opens once`), " and asks you to approve ", h("b", {}, plural(n, "transaction")), `. ${n === 1 ? "It closes" : "Together they close"} ${plural(accts, "token account")}.`)),
+        h("li", {}, icon("wallet"), h("span", {}, h("b", {}, `${state.wallet?.name || "Your wallet"} opens once`), " and asks you to approve ", h("b", {}, plural(n, "transaction")), `. ${n === 1 ? "It closes" : "Together they close"} ${plural(accts, "account")}.`)),
         h("li", {}, icon("arrow"), h("span", {}, "Coming in: ", h("b", {}, `${solApprox(back)} SOL`), unwrap ? ", rent plus your unwrapped SOL." : " of rent.")),
         burns > 0 && h("li", { class: "ask-warn" }, icon("flame", "i pink"), h("span", {}, h("b", {}, `${plural(burns, "token")} ${burns === 1 ? "leaves" : "leave"} for good. `), `${burns === 1 ? "It’s" : "They’re"} burned, not sold, and that can’t be undone.`)),
         // network fees are tiny (~0.000005 SOL each), so they get significant digits rather than four decimals
