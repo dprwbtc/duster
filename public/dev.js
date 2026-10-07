@@ -365,13 +365,15 @@ export async function init(app, params) {
       if (r.frozen) { skipped.push({ mint, reason: "account frozen" }); continue; }
       if (r.usd == null) { skipped.push({ mint, reason: "no reliable price" }); continue; }
       if (r._skip) { skipped.push({ mint, reason: r._skip.startsWith("no route") ? "no route found" : r._skip }); continue; }
+      if (dev.lowSol) { skipped.push({ mint, reason: "not enough SOL" }); continue; }
       const outUsd = r.usd * (1 - r._loss);
       if (outUsd < r.usd * (1 - maxLoss)) { skipped.push({ mint, reason: `route returns $${outUsd.toFixed(4)} for $${r.usd.toFixed(4)} (> ${Math.round(maxLoss * 100)}% loss)` }); continue; }
       const outAmount = outUsd / outPrice, minOut = outAmount * (1 - slip);
       const fee = feeApplied ? { amountIn: minOut * 0.01, usd: minOut * 0.01 * outPrice, burned: (minOut * 0.01 * outPrice) / PRICES[BURN] } : null;
       txs.push({ tx: randB64(420), bytes: 420, legs: [{ mint, usdIn: r.usd, outAmount, minOut }], fee });
     }
-    return { skipped, feeApplied, burnMint: feeApplied ? BURN : null, outPrice, txs };
+    // the server adds the wallet's SOL balance only when something was skipped for lack of SOL
+    return { skipped, feeApplied, burnMint: feeApplied ? BURN : null, outPrice, txs, ...(dev.lowSol ? { solLamports: 1_174_211 } : {}) };
   }
   // about 20 closes per "transaction", like the real packing; fixtures marked _skip are skipped with that reason
   async function fakeReclaim(b, signal) {
@@ -437,7 +439,7 @@ export async function init(app, params) {
     s.rc = app.rcFresh(); s.signing = null; s.intent = null;
     s.busy = null; s.building = null; s.connecting = false; s.connectingSilent = false; s.plan = null; s.run = null; s.stale = false; s.staleWhy = null; s.notice = null; s.pendingAccounts = null; s.tempLoss = null;
     document.getElementById("main").inert = false;
-    dev.hideWallets = false; dev.planDelay = 1300; dev.statusDelay = [900, 3600]; dev.autoApprove = null; dev.accounts = "normal";
+    dev.hideWallets = false; dev.lowSol = false; dev.planDelay = 1300; dev.statusDelay = [900, 3600]; dev.autoApprove = null; dev.accounts = "normal";
     s.out = app.DEFAULT_OUTS[0]; s.customAck = false; s.includeBurn = false; s.query = ""; document.getElementById("listSearch").value = "";
     s.preset = 2; s.range = { min: 0, max: 2 };
   }
@@ -517,6 +519,7 @@ export async function init(app, params) {
       ["error toast", async () => { await connected("normal"); app.toast({ title: "the server timed out", body: "Try fewer tokens at once. Nothing was signed or sent.", tone: "bad", actions: [{ label: "try again", run: () => app.startPreview() }] }); }],
       ["30+ tokens", () => connected("airdrop")],
       ["over the limit", async () => { await connected("airdrop"); const s = app.state; s.selected = new Set(s.rows.filter((r) => r.usd != null).map((r) => r.mint)); app.syncRows(); app.renderPocketsMeta(); app.renderAside(); app.renderBar(); }],
+      ["short on SOL", async () => { await connected("normal"); dev.lowSol = true; dev.planDelay = 150; await app.startPreview(); }],
       ["into $LILVADER, no fee", async () => { await connected("normal"); if (app.burnOut()) app.setOut(app.burnOut()); }],
       ["review into $LILVADER", () => review({ lilvader: true })],
       ["unverified output", async () => { await connected("normal"); app.setOut({ ...CATALOG[3] }); }],

@@ -163,6 +163,20 @@ export function fitsOne(payer: PublicKey, leg: SwapLeg, fee: FeeLeg | null, clos
 export type BuildResult = { batch: Batch } | { tooLarge: true } | { error: string };
 
 /**
+ * Skip reason when the wallet can't front the lamports a swap needs for a moment: the network fee, and rent for an
+ * account the swap opens (wrapped SOL, which the same transaction closes again, or a first-time token account).
+ * No re-quote fixes it; more SOL in the wallet (from the cleanup, say) does.
+ */
+export const NO_SOL = "not enough SOL";
+
+function simError(sim: { err: unknown; logs: string[] | null }): string {
+  const err = JSON.stringify(sim.err);
+  // AccountNotFound: a wallet with no SOL at all has no account to pay the fee from (reclaim.ts reads it the same way)
+  if (/InsufficientFundsFor(Fee|Rent)/.test(err) || err === '"AccountNotFound"' || sim.logs?.some((l) => /insufficient lamports/i.test(l))) return NO_SOL;
+  return `simulation failed: ${err}`;
+}
+
+/**
  * One token per transaction: its swap, the close of its emptied account, and its own buy-and-burn, so the
  * fee is atomic with the swap. Simulates to size the compute budget. Unsigned.
  */
@@ -182,7 +196,7 @@ export async function buildOne(
   let sim = await simulate(close);
   // Some accounts can't be closed (e.g. Token-2022 with withheld transfer fees): keep the account rather than lose the swap.
   if (sim.err && close) sim = await simulate((close = false));
-  if (sim.err) return { error: `simulation failed: ${JSON.stringify(sim.err)}` };
+  if (sim.err) return { error: simError(sim) };
   const limit = sim.unitsConsumed ? Math.min(Math.ceil(sim.unitsConsumed * 1.2), CU_MAX) : CU_MAX;
   return { batch: { legs: [leg], fee, tx: compile(payer, [leg], fee, close, limit, blockhash), blockhash, lastValidBlockHeight } };
 }

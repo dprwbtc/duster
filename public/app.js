@@ -849,8 +849,13 @@ function renderBar() {
     else if (n && (fee() || p.feeApplied === false)) feeLine(feeEl, fee() ? "no fee" : "no fee on this run", "greent");
     if (state.busy === "signing") { caption("stampin’ a fresh blockhash…"); return setCta("preparing…", { disabled: true, busy: true }); }
     const left = cooldownLeft();
+    if (!n && shortOfSol(p) && lamSum(rcEmptiesMine()) > 0) {
+      // the rent in the wallet's empty accounts is the SOL these swaps are missing
+      caption("short on SOL. your empty pockets got some");
+      return setCta("get rent back", { action: () => openCleanup() });
+    }
     if (!n) {
-      caption(allRateLimited(p) ? "hold up. the server needs a breather" : "nothing made the cut");
+      caption(allRateLimited(p) ? "hold up. the server needs a breather" : shortOfSol(p) ? "short on SOL. top up a little" : "nothing made the cut");
       return setCta("back to the pockets", { action: () => go("pockets", { back: true }) });
     }
     $("#ring").hidden = false; renderRing(false);
@@ -1532,6 +1537,7 @@ async function startPreview(mints, { notice = null, reuse = null } = {}) {
     merged.feeApplied = merged.feeApplied || !!res.feeApplied;
     merged.burnMint = res.burnMint || merged.burnMint;
     if (typeof res.outPrice === "number") merged.outPrice = res.outPrice;
+    if (typeof res.solLamports === "number") merged.solLamports = res.solLamports;
     const ready = new Set((res.txs || []).flatMap((t) => (t.legs || []).map((l) => l.mint)));
     const skipped = new Map((res.skipped || []).map((s) => [s.mint, s.reason]));
     for (const it of chunk) {
@@ -1601,6 +1607,20 @@ $("#cutBack").addEventListener("click", () => {
   go("pockets", { back: true }).then(() => { syncRows(); renderPocketsMeta(); renderAside(); renderBar(); });
 });
 
+// a swap the wallet can't fund: rent for an account the swap opens (wrapped SOL, which the same transaction closes
+// again, or a first-time token account) plus the network fee
+const NO_SOL = "not enough SOL";
+const lowSolWhy = (p) => "Not enough SOL on hand. While a swap runs, it needs about 0.002 SOL of rent for each token account it opens (a temporary one comes back in the same transaction) plus a network fee."
+  + (typeof p.solLamports === "number" ? ` This wallet has ${solAmt(p.solLamports)} SOL.` : "");
+// nothing could be built and at least one swap was short of SOL: that's the fix to lead with
+const shortOfSol = (p) => !!p && !p.txs.length && p.skipped.some((s) => s.reason === NO_SOL);
+// the way out of "not enough SOL": rent the cleanup can give back, or else adding a little SOL
+function lowSolFix(busy) {
+  const lam = lamSum(rcEmptiesMine());
+  if (rcMine() && state.rc.accounts && !lam) return h("p", { class: "hint" }, "Add a little SOL to this wallet (0.003 SOL covers it), then try again.");
+  return h("div", { class: "skip-fix" }, h("button", { class: "btn-ghost sm", type: "button", "data-fk": "fix-rent", disabled: busy, onclick: () => openCleanup() },
+    lam ? `get ${solApprox(lam)} SOL of rent back first` : "look for rent to get back first", icon("arrow", "i i-sm")));
+}
 function humanSkip(s, p) {
   const r = String(s.reason || "");
   let m;
@@ -1613,6 +1633,7 @@ function humanSkip(s, p) {
     return { why: `Would return ${usdP(got)} for ${usdP(inn)} (−${loss.toFixed(0)}% vs. market). Your limit is ${p.set.loss}%.`, loss: need <= 50 ? need : null,
       note: need > 50 ? "That’s more than the 50% maximum, so it can’t be included." : null };
   }
+  if (r === NO_SOL) return { why: lowSolWhy(p), fix: "retry", cleanup: true };
   if (r.startsWith("buy-and-burn")) return { why: "The burn route is busy right now, and a swap never goes through without its fee. Try again in a moment.", fix: "retry" };
   if (r.startsWith("route too large")) return p.out.id === SOL
     ? { why: "This token’s route is too complex to fit in one transaction with its burn, so it can’t be sold here right now." }
@@ -1716,12 +1737,14 @@ function drawCut() {
   }
   if (!p) return;
   const o = p.out, n = p.txs.length, t = planTotals(p), busy = !!state.busy, rl = allRateLimited(p);
-  $("#cut-title").textContent = n ? (state.stale ? "quotes went stale" : "review the cut") : rl ? "preview paused" : "nothing made the cut";
+  const noSol = shortOfSol(p);
+  $("#cut-title").textContent = n ? (state.stale ? "quotes went stale" : "review the cut") : rl ? "preview paused" : noSol ? "short on SOL" : "nothing made the cut";
   $("#cutFacts").textContent = n && state.stale
     ? (state.staleWhy === "settings" ? "These quotes used your old protection settings. Refresh to quote again with the new ones, then approve. Nothing was sent."
       : `The oldest of these quotes is more than ${TTL_MS / 1000} seconds old, so prices may have moved. Refresh to get fresh ones, then approve. Nothing was sent.`)
     : n ? `${plural(n, "token")} ready, one transaction each${p.feeApplied ? ", each with its own buy and burn" : ""}. Your wallet will ask once for all ${n}.${p.skipped.length ? ` Another ${p.skipped.length} ${p.skipped.length === 1 ? "was" : "were"} skipped (reasons below).` : ""}`
     : rl ? "Duster is rate-limiting previews for a moment. Nothing was built or signed. Try again when the timer runs out."
+    : noSol ? `Swaps need a little SOL on hand while they run${typeof p.solLamports === "number" ? `, and this wallet has ${solAmt(p.solLamports)} SOL` : ""}. Nothing was built or signed. Fixes are below.`
     : "None of these tokens could be swapped safely right now. Nothing was built or signed. Reasons and fixes are below.";
   fill(heroEl,
     h("div", { class: "ch-block" }, h("p", { class: "overline" }, "you sell"), h("p", { class: "ch-big" }, plural(n, "token")), h("p", { class: "ch-sub" }, `worth ≈ ${usd(t.usdIn)}`)),
@@ -1753,6 +1776,7 @@ function drawCut() {
           h("span", { class: "tno" }, String(n + gi + 1).padStart(2, "0")),
           h("div", { style: "min-width:0" }, h("span", { class: "skip-sym" }, symList(items)), items.length > 1 && h("span", { class: "skip-n" }, ` · ${items.length} tokens`), h("p", { class: "skip-why" }, hm.why), hm.note && h("p", { class: "hint" }, hm.note),
             hm.raw && items.length === 1 && h("details", { "data-fk": "raw-" + items[0].s.mint }, h("summary", { "data-fk": "rawsum-" + items[0].s.mint }, "technical details"), h("span", { class: "mono" }, hm.raw)),
+            hm.cleanup && lowSolFix(busy),
             hm.fix === "sol" && h("div", { class: "skip-fix" }, h("button", { class: "btn-ghost sm", type: "button", "data-fk": "fix-sol-" + gi, disabled: busy, onclick: () => { if (state.busy) return; setOut(DEFAULT_OUTS[0]); startPreview(p.mints); } }, "preview into SOL instead"))));
       }),
       h("div", { class: "skip-fix", style: "margin-top:12px" },

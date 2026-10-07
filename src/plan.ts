@@ -1,14 +1,21 @@
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddressSync, getMint } from "@solana/spl-token";
-import { getBuild, type BuildResponse, type PriceInfo } from "./jupiter.js";
-import { buildOne, fitsOne, type Batch, type FeeLeg, type SwapLeg } from "./pack.js";
+import { JupiterError, getBuild, type BuildResponse, type PriceInfo } from "./jupiter.js";
+import { NO_SOL, buildOne, fitsOne, type Batch, type FeeLeg, type SwapLeg } from "./pack.js";
 import type { Holding } from "./wallet.js";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 /** Account caps for the dust swap, loosest first: looser routes usually price better but make bigger transactions. */
 const DUST_CAPS = [64, 48, 40, 32, 24, 20];
-/** Account caps for the buy-and-burn swap, tightest first, so it leaves the most room for the dust swap. */
-const FEE_CAPS = [24, 32, 40, 48, 64];
+/**
+ * Account caps for the buy-and-burn swap, tightest first, so it leaves the most room for the dust swap. A pump.fun
+ * AMM pool (where $LILVADER trades) takes 28 accounts from SOL, and two hops (40) from USDC or USDT; a tighter cap
+ * only spends a rate-limited quote on "no route".
+ */
+const FEE_CAPS = [28, 32, 40, 48, 64];
+/** Skip reasons the UI maps to a retry or an explanation. */
+const BUSY = "quote service busy; try again shortly";
+const TOO_LARGE = "route too large to fit in one transaction with its buy-and-burn";
 
 /** Buy-and-burn fee: `bps` of each transaction's guaranteed output buys `burnMint`, which is then burned. */
 export interface FeeConfig {
@@ -94,6 +101,8 @@ export async function makeFeeKit(o: PlanOptions): Promise<FeeKit> {
   const { decimals } = await getMint(o.connection, mint, "confirmed", tokenProgram);
   const account = getAssociatedTokenAddressSync(mint, o.owner, false, tokenProgram);
   const memoKey = `${o.outMint}>${fee.burnMint}`;
+  // Into SOL the fee is one hop; from anything else it needs a second one, so start where that fits.
+  const caps = o.outMint === SOL_MINT ? FEE_CAPS : FEE_CAPS.filter((c) => c >= 40);
   const tplKey = `${memoKey}@${o.owner.toBase58()}`; // fee quotes carry the taker's accounts
   const leg = (build: BuildResponse, amountIn: bigint): FeeLeg =>
     // Burn the minimum the swap guarantees; any extra from positive slippage stays with the user.
@@ -101,7 +110,7 @@ export async function makeFeeKit(o: PlanOptions): Promise<FeeKit> {
 
   const quote = async (amountIn: bigint): Promise<BuildResponse> => {
     let last: unknown;
-    for (let i = feeCapMemo.get(memoKey) ?? 0; i < FEE_CAPS.length; i++) {
+    for (let i = feeCapMemo.get(memoKey) ?? 0; i < caps.length; i++) {
       try {
         const build = await getBuild(o.apiKey, {
           inputMint: o.outMint,
@@ -109,11 +118,12 @@ export async function makeFeeKit(o: PlanOptions): Promise<FeeKit> {
           amount: amountIn.toString(),
           taker: o.owner.toBase58(),
           slippageBps: fee.slippageBps,
-          maxAccounts: FEE_CAPS[i],
+          maxAccounts: caps[i],
         });
         feeCapMemo.set(memoKey, i);
         return build;
       } catch (e) {
+        if (e instanceof JupiterError && e.busy) throw e; // a wider route won't help while Jupiter is busy
         last = e;
       }
     }
@@ -176,8 +186,8 @@ export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; ski
     await Promise.all(Array.from({ length: 3 }, async () => { for (let x; (x = queue.shift()) !== undefined; ) await fn(x); }));
   };
 
-  // Quote one dust swap at a given cap; null (and a skip reason) when it can't be sold.
-  const quoteDust = async (c: (typeof o.items)[number], cap: number): Promise<SwapLeg | null> => {
+  // Quote one dust swap at a given cap, or say why it can't be sold.
+  const quoteDust = async (c: (typeof o.items)[number], cap: number): Promise<SwapLeg | string> => {
     let leg: SwapLeg;
     try {
       const build = await getBuild(o.apiKey, {
@@ -191,14 +201,12 @@ export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; ski
       leg = { holding: c.h, build, usdIn: c.usd };
     } catch (e) {
       console.error(`no route for ${c.h.mint} at maxAccounts=${cap}: ${(e as Error).message.slice(0, 300)}`);
-      skipped.push({ mint: c.h.mint, reason: `no route: ${(e as Error).message.slice(0, 120)}` });
-      return null;
+      // Jupiter being busy or down says nothing about the token's market.
+      return e instanceof JupiterError && e.busy ? BUSY : `no route: ${(e as Error).message.slice(0, 120)}`;
     }
     const outUsd = (Number(leg.build.outAmount) / 10 ** o.outInfo.decimals) * o.outInfo.usdPrice;
-    if (outUsd < c.usd * (1 - o.maxLoss)) {
-      skipped.push({ mint: c.h.mint, reason: `route returns $${outUsd.toFixed(4)} for $${c.usd.toFixed(4)} (> ${Math.round(o.maxLoss * 100)}% loss)` });
-      return null;
-    }
+    if (outUsd < c.usd * (1 - o.maxLoss))
+      return `route returns $${outUsd.toFixed(4)} for $${c.usd.toFixed(4)} (> ${Math.round(o.maxLoss * 100)}% loss)`;
     return leg;
   };
 
@@ -206,7 +214,8 @@ export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; ski
   const quoted: { c: (typeof o.items)[number]; leg: SwapLeg }[] = [];
   await pool(o.items, async (c) => {
     const leg = await quoteDust(c, caps[0]);
-    if (leg) quoted.push({ c, leg });
+    if (typeof leg === "string") skipped.push({ mint: c.h.mint, reason: leg });
+    else quoted.push({ c, leg });
   });
 
   // 2. One fee quote for the largest fee in the batch; every other fee scales down from it.
@@ -224,9 +233,14 @@ export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; ski
 
   // 3. Fit each swap with its own buy-and-burn (tightening the route only if needed), then simulate.
   await pool(quoted, async ({ c, leg: first }) => {
-    let leg: SwapLeg | null = first;
+    let leg: SwapLeg = first;
     for (let i = 0; i < caps.length; i++) {
-      if (i > 0 && !(leg = await quoteDust(c, caps[i]))) return;
+      if (i > 0) {
+        const tighter = await quoteDust(c, caps[i]);
+        // It has a market (it routed wider), just no route small enough to fit next to its buy-and-burn.
+        if (typeof tighter === "string") return skipped.push({ mint: c.h.mint, reason: tighter.startsWith("no route") ? TOO_LARGE : tighter });
+        leg = tighter;
+      }
       let fee: FeeLeg | null;
       try {
         fee = await kit.forLegs([leg]);
@@ -236,8 +250,9 @@ export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; ski
       }
       if (!fitsOne(o.owner, leg, fee, o.closeSource)) continue;
       let r = await buildOne(o.connection, o.owner, leg, fee, o.closeSource, await recent());
-      if ("error" in r && fee) {
-        // A scaled fee that doesn't simulate gets one exact quote before the token is given up on.
+      if ("error" in r && fee && r.error !== NO_SOL) {
+        // A scaled fee that doesn't simulate gets one exact quote before the token is given up on (not when the
+        // wallet is short of SOL: no quote changes that).
         try {
           const exact = await kit.forLegs([leg], { exact: true });
           if (fitsOne(o.owner, leg, exact, o.closeSource)) r = await buildOne(o.connection, o.owner, leg, exact, o.closeSource, await recent());
@@ -246,7 +261,7 @@ export async function planSwaps(o: PlanOptions): Promise<{ batches: Batch[]; ski
       if ("batch" in r) return batches.push(r.batch);
       if ("error" in r) return skipped.push({ mint: c.h.mint, reason: r.error });
     }
-    skipped.push({ mint: c.h.mint, reason: "route too large to fit in one transaction with its buy-and-burn" });
+    skipped.push({ mint: c.h.mint, reason: TOO_LARGE });
   });
 
   // Keep the order the user saw.
