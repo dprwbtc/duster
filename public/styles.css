@@ -155,7 +155,9 @@ img { display: block; max-width: 100%; }
   background: linear-gradient(180deg, #fff3cf, var(--flare) 35%, var(--gold) 60%, var(--gold-deep));
   -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 1px 0 rgb(74 46 12 / .9));
-  padding: 6px 6px 8px 2px;
+  /* the script's lead-in and the t's crossbar reach past the glyph box, and the gradient only paints inside the
+     padding, so the padding is generous and the negative margins keep the layout where it was */
+  padding: .17em .4em .28em .34em; margin-inline: -.28em -.14em;
 }
 .brand-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--sith); margin-left: 1px; box-shadow: 0 0 10px var(--sith); translate: 0 8px; }
 

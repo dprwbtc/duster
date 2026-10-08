@@ -15,6 +15,7 @@ try {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
 } catch {
   canvas.remove(); // no WebGL: the page keeps its painted haze and the text
+  document.documentElement.classList.add("ready");
   throw new Error("WebGL unavailable");
 }
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
@@ -151,7 +152,7 @@ const pointer = { x: 0, y: 0 }, look = { x: 0, y: 0 };
 addEventListener("pointermove", (e) => { pointer.x = (e.clientX / innerWidth) * 2 - 1; pointer.y = -((e.clientY / innerHeight) * 2 - 1); }, { passive: true });
 
 let raf = 0;
-const start = performance.now();
+let start = performance.now();
 
 // ---------- layout: the U wraps $LILVADER and bottoms out just below it ----------
 const h1 = document.querySelector("h1");
@@ -179,12 +180,11 @@ function resize() {
   if (calm) frame(performance.now());
 }
 addEventListener("resize", resize);
-resize();
 document.fonts?.ready.then(resize);
 
 // ---------- the loop ----------
 document.addEventListener("visibilitychange", kick);
-function kick() { if (!raf && !document.hidden && !calm) raf = requestAnimationFrame(frame); }
+function kick() { if (!raf && !document.hidden && !calm && HANG.length) raf = requestAnimationFrame(frame); }
 function frame(now) {
   raf = 0;
   const t = calm ? 10 : (now - start) / 1000;
@@ -212,4 +212,21 @@ function frame(now) {
   composer.render();
   if (!calm) kick();
 }
-if (!calm) kick();
+
+// ---------- first paint ----------
+// The page stays hidden (see index.html) until the title's font is in and the first frame is drawn, so the title
+// never flashes in a fallback font, the chain never refits around a font swap, and the drop starts when it shows.
+const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
+async function boot() {
+  const fonts = document.fonts
+    ? Promise.all([document.fonts.load('400 100px "Pirata One"', "$LILVADER"), document.fonts.load('700 15px "Barlow Condensed"'), document.fonts.load('600 15px "Barlow Condensed"')]).catch(() => {})
+    : null;
+  await Promise.race([fonts, new Promise((r) => setTimeout(r, 2500))]);
+  resize();
+  start = performance.now();
+  frame(start); // compiles the shaders and uploads the chain while nothing shows yet
+  await nextFrame(); await nextFrame();
+  start = performance.now();
+  document.documentElement.classList.add("ready");
+}
+boot();
