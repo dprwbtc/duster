@@ -246,7 +246,7 @@ let srT;
 function srSay(text) { const el = $("#srStatus"); clearTimeout(srT); el.textContent = ""; srT = setTimeout(() => { el.textContent = text; }, 60); }
 
 /* ================= mascot ================= */
-const POSE_DIMS = { 1: [191, 326], 2: [246, 326], 3: [245, 325], 4: [160, 321], 5: [303, 325], 6: [242, 317], 7: [259, 334], 8: [252, 312], 9: [248, 314], 10: [285, 309], 11: [308, 314], 12: [274, 312], 13: [212, 312], 14: [262, 321], 15: [263, 318], 16: [259, 320], 17: [189, 319], 18: [261, 321], 19: [222, 322] };
+const POSE_DIMS = { 1: [187, 322], 2: [242, 321], 3: [241, 321], 4: [157, 317], 5: [299, 321], 6: [240, 313], 7: [255, 330], 8: [248, 307], 9: [244, 311], 10: [280, 305], 11: [305, 309], 12: [270, 308], 13: [258, 317], 14: [259, 314], 15: [255, 316], 16: [257, 317] };
 const pose = (n) => `/img/droid/pose-${String(n).padStart(2, "0")}.webp`;
 function setPose(btn, n, { mode = "idle", hop = true } = {}) {
   if (!btn) return;
@@ -908,7 +908,7 @@ async function loadHoldings({ silent = false } = {}) {
     return;
   }
   const capped = autoSelect(true);
-  setPose(sceneMascot("pockets"), state.rows.some((r) => r.usd != null) ? 2 : 13);
+  setPose(sceneMascot("pockets"), state.rows.some((r) => r.usd != null) ? 2 : 1);
   renderPockets({ stagger: true });
   if (capped) toast({ title: `picked the ${MAX} largest`, body: `You have ${capped} tokens in this range. ${MAX} fit in one run; dust the rest next run.` });
 }
@@ -1029,7 +1029,7 @@ function makeRow(r) {
     if (input.checked) sweep(el);
     invalidatePlan();
     renderPocketsMeta(); renderAside(); renderBar();
-    if (input.checked) react(state.selected.size >= MAX ? 13 : 9, 2, 900);
+    if (input.checked) react(state.selected.size >= MAX ? 1 : 9, 2, 900);
     if (input.checked && r.usd > Math.max(25, state.range.max === Infinity ? 25 : state.range.max)) toast({ title: "heads up: that’s not dust", body: [h("span", { class: "data" }, tokLabel(r)), ` is worth ${usd(r.usd)}. Untick it if you meant to keep it.`] });
   });
   return el;
@@ -1124,7 +1124,7 @@ function renderPockets({ stagger = false } = {}) {
     const rent = rcEmptiesMine();
     if (rent.length) $("#pkFacts").textContent += ` ${plural(rent.length, "empty account")} still ${rent.length === 1 ? "holds" : "hold"} about ${solAmt(rent.reduce((a, x) => a + x.rentLamports, 0))} SOL of rent you can get back.`;
     // with rent on offer, the bar's one action is "reclaim"; the card doesn't repeat it
-    fill(pkState, rent.length ? stateStill(13, "rent to reclaim", "Empty token accounts in this wallet are holding SOL. Reclaim it from the bar below.") : stateStill(13, "nothing to sell", "Check back after more small tokens land in this wallet."),
+    fill(pkState, rent.length ? stateStill(1, "rent to reclaim", "Empty token accounts in this wallet are holding SOL. Reclaim it from the bar below.") : stateStill(1, "nothing to sell", "Check back after more small tokens land in this wallet."),
       h("div", { class: "state-actions" },
         h("button", { class: "btn-ghost sm", type: "button", onclick: () => openWallets() }, icon("wallet", "i i-sm"), "switch wallet"),
         h("button", { class: "btn-text sm", type: "button", onclick: () => loadHoldings() }, icon("refresh", "i i-sm"), "check again")));
@@ -1526,7 +1526,7 @@ async function startPreview(mints, { notice = null, reuse = null } = {}) {
   state.building = null; setIdle();
   renderCut(); renderBar(); startRing();
   const n = state.plan.txs.length;
-  setPose(sceneMascot("cut"), n ? 19 : 4);
+  setPose(sceneMascot("cut"), n ? 8 : 4);
   srSay(n ? `Preview ready: ${plural(n, "transaction")}, one wallet prompt.${merged.skipped.length ? ` ${merged.skipped.length} skipped.` : ""}` : "Nothing could be swapped. Reasons are listed.");
   if (failure) {
     const p = state.plan;
@@ -1876,7 +1876,7 @@ async function approve() {
       ? { title: "cancelled in wallet. nothing was sent", body: fresh2 ? "The preview is still fresh. Approve again when you’re ready." : "Refresh the quotes whenever you’re ready." }
       : { title: "the wallet couldn’t sign", body: `${String(e?.message || e).slice(0, 160)} Nothing was sent.`, tone: "bad" });
     setPose(sceneMascot("cut"), 4);
-    setTimeout(() => setPose(sceneMascot("cut"), 19, { hop: false }), 1600);
+    setTimeout(() => setPose(sceneMascot("cut"), 8, { hop: false }), 1600);
     return;
   }
   p.sent = true; // from here on this plan can only be retried as a fresh preview
@@ -2227,7 +2227,7 @@ function dustAgain() {
   if (state.rowsFor !== state.account?.address) { go("pockets", { back: true }).then(() => loadHoldings()); return; }
   go("pockets", { back: true }).then(() => {
     autoSelect(true);
-    setPose(sceneMascot("pockets"), state.rows.some((r) => r.usd != null) ? 2 : 13);
+    setPose(sceneMascot("pockets"), state.rows.some((r) => r.usd != null) ? 2 : 1);
     renderPockets();
   });
 }
@@ -2360,7 +2360,7 @@ async function loadAccounts({ silent = false, prices = false } = {}) {
     rc.burnSel = new Set([...rc.burnSel].filter((x) => by.get(x)?.burnable));
   }
   rcBackfillNames();
-  if (state.scene === "cleanup" && !rc.plan && !rc.building) setPose(sceneMascot("cleanup"), rcHasWork() ? 2 : 13);
+  if (state.scene === "cleanup" && !rc.plan && !rc.building) setPose(sceneMascot("cleanup"), rcHasWork() ? 2 : 1);
   renderCleanup(); renderRentCard(); renderResultReclaim(); renderBar();
   if (state.scene === "pockets" && !state.loading && !state.loadError && !state.rows.some((r) => r.usd != null && !isBurnRow(r))) renderPockets();
 }
@@ -2507,7 +2507,7 @@ function drawRcPick() {
       : alone.unchecked ? "Every account in this wallet still holds something, and some couldn’t be checked just now, so there’s nothing to close."
       : "This wallet has no token accounts besides SOL itself, so there’s nothing to close.";
     // the bar carries "back to your dust"; the card only offers what the bar doesn't
-    fill(main, h("div", { class: "state-card" }, stateStill(13, "all clear", blocked.length ? "This wallet isn’t allowed to close the accounts it has." : "Empty accounts show up here after you sell or send tokens."),
+    fill(main, h("div", { class: "state-card" }, stateStill(1, "all clear", blocked.length ? "This wallet isn’t allowed to close the accounts it has." : "Empty accounts show up here after you sell or send tokens."),
       h("div", { class: "state-actions" }, h("button", { class: "btn-text sm", type: "button", onclick: () => loadAccounts() }, icon("refresh", "i i-sm"), "check again"))),
       rcBlockedBox(blocked), rcLeftAlone(alone));
     aside.replaceChildren();
@@ -2908,7 +2908,7 @@ async function buildReclaim({ notice = null } = {}) {
   rc.plan = { txs, skipped, owner, at: Date.now(), sent: false, burns: txs.reduce((s, t) => s + t.accounts.filter((a) => a.action !== "close").length, 0) };
   setIdle();
   renderCleanup(); renderBar();
-  setPose(sceneMascot("cleanup"), txs.length ? 19 : 4);
+  setPose(sceneMascot("cleanup"), txs.length ? 8 : 4);
   srSay(txs.length ? `Review ready: ${plural(txs.length, "transaction")}, one wallet prompt.${skipped.length ? ` ${skipped.length} skipped.` : ""}` : "Nothing could be closed. Reasons are listed.");
 }
 function rcCancelBuild() {
@@ -2969,7 +2969,7 @@ async function approveReclaim() {
       ? { title: "cancelled in wallet. nothing was sent", body: "The review is still here. Approve again when you’re ready." }
       : { title: "the wallet couldn’t sign", body: `${String(e?.message || e).slice(0, 160)} Nothing was sent.`, tone: "bad" });
     setPose(sceneMascot("cleanup"), 4);
-    setTimeout(() => setPose(sceneMascot("cleanup"), 19, { hop: false }), 1600);
+    setTimeout(() => setPose(sceneMascot("cleanup"), 8, { hop: false }), 1600);
     return;
   }
   p.sent = true;

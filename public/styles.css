@@ -1058,6 +1058,8 @@ html.revisit .bar-top .bar-in, html.revisit .bar-bot .bar-in { animation: none; 
 .liner-cleanup > div { flex: 1 1 420px; min-width: 0; }
 .liner-cleanup p:not(.overline) { color: var(--lav-2); font-size: 14px; max-width: 68ch; }
 .liner-cleanup .btn-ghost { flex: none; }
+.powered { padding: 24px 0 8px; border-top: 1px solid var(--hair); text-align: center; font-size: 13px; color: var(--lav-2); }
+.powered a { color: var(--text); text-underline-offset: 3px; }
 
 .rent-card { animation: fadein .45s var(--ease-out); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; --c: rgb(222 178 95 / .55); --fbg: linear-gradient(180deg, rgb(222 178 95 / .09), rgb(45 32 49 / .32)); }
 .rent-card .overline { margin-bottom: 4px; color: var(--flare); }
