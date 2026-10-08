@@ -406,25 +406,6 @@ function buildStill() {
   $("#heroMascot .m-rim").style.setProperty("--pose", `url("${pose(2)}")`);
 }
 
-/* the gold nameplate: script text with a specular bevel */
-async function drawNameplate() {
-  const svg = $("#plateSvg"), text = $("#plateText");
-  try { await Promise.race([document.fonts.load('400 196px "Mr Dafoe"'), sleep(2500)]); } catch {}
-  let bb = text.getBBox();
-  if (bb.width > 0) {
-    text.style.fontSize = Math.min(240, 196 * (560 / bb.width)) + "px";
-    bb = text.getBBox();
-    text.setAttribute("y", String(Number(text.getAttribute("y")) - (bb.y - 10)));
-    bb = text.getBBox();
-    svg.setAttribute("viewBox", `0 0 640 ${Math.ceil(bb.y + bb.height + 18)}`);
-  }
-  const gl = $("#plateGlint");
-  gl.setAttribute("x", (bb.x + bb.width * 0.22 - 13).toFixed(1));
-  gl.setAttribute("y", (bb.y + bb.height * 0.06).toFixed(1));
-  if (reduced() || root.classList.contains("revisit")) { svg.classList.add("ready"); return; }
-  svg.classList.remove("enter"); void svg.getBoundingClientRect(); svg.classList.add("enter");
-  svg.addEventListener("animationend", () => svg.classList.add("ready"), { once: true });
-}
 function openingShutter() {
   const t = $("#shutterTop"), b = $("#shutterBot");
   if (reduced() || !t.animate || root.classList.contains("revisit")) { t.remove(); b.remove(); return; }
@@ -3115,7 +3096,6 @@ buildPresets();
 buildStill();
 renderBar(); renderSetSummary();
 openingShutter();
-drawNameplate();
 window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: registry }));
 setTimeout(() => { state.booted = true; if (dlg.open && !dialogConnecting()) openWallets(); }, 700);
 loadConfig();
