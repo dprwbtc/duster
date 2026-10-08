@@ -214,7 +214,6 @@ async function api(path, body, { signal } = {}) {
 }
 
 /* ================= scene control ================= */
-const SCENES = { title: ["sc. 00", "title", 0], pockets: ["sc. 01", "the pockets", 1], cleanup: ["sc. 01", "the cleanup", 1], sweep: ["sc. 02", "the sweep", 2], cut: ["sc. 02", "the cut", 2], wallet: ["sc. 03", "your move", 3], drop: ["sc. 04", "the drop", 4] };
 let currentVT = null;
 function vt(update, types = []) {
   if (!document.startViewTransition || reduced() || document.hidden) { update(); return Promise.resolve(); }
@@ -236,30 +235,13 @@ function go(scene, { back = false, instant = false } = {}) {
     if (scene === "pockets" && !state.loading && !state.loadError && state.rows.length) { syncRows(); renderPocketsMeta(); renderAside(); requestAnimationFrame(movePresetThumb); }
     if (scene === "pockets") renderRentCard();
     if (scene === "cleanup") renderCleanup();
-    renderSlate(); renderBar();
+    renderBar();
   };
   if (instant || state.scene === scene) { apply(); return Promise.resolve(); }
   return vt(apply, [back ? "back" : "forward"]);
 }
-function renderSlate() {
-  // the cleanup's review is its own beat (sc. 02), like the cut is for swaps
-  const key = root.classList.contains("cinema-on") ? "wallet" : state.scene === "cleanup" && (state.rc.plan || state.rc.building) ? "sweep" : state.scene;
-  const [num, name, idx] = SCENES[key];
-  $("#slateNum").textContent = num;
-  $("#slateName").textContent = name;
-  $$("#slateTicks i").forEach((t, i) => { t.className = i + 1 === idx ? "on" : i + 1 < idx ? "done" : ""; });
-}
 
-/* subtitles (decorative, aria-hidden) and the screen-reader status line */
-let lastCap = "";
-function caption(text) {
-  if (text === lastCap) return;
-  lastCap = text;
-  const el = $("#subtitle");
-  el.replaceChildren();
-  if (reduced()) { el.textContent = text; return; }
-  text.split(" ").forEach((w, i) => { el.append(h("span", { class: "w", style: `animation-delay:${i * 45}ms` }, w), " "); });
-}
+/* the screen-reader status line */
 let srT;
 function srSay(text) { const el = $("#srStatus"); clearTimeout(srT); el.textContent = ""; srT = setTimeout(() => { el.textContent = text; }, 60); }
 
@@ -431,7 +413,7 @@ function buildStill() {
   $("#heroMascot .m-rim").style.setProperty("--pose", `url("${pose(2)}")`);
 }
 
-/* the gold nameplate: script text with a specular bevel, hung from Cuban links that reach up into the top bar */
+/* the gold nameplate: script text with a specular bevel */
 async function drawNameplate() {
   const svg = $("#plateSvg"), text = $("#plateText");
   try { await Promise.race([document.fonts.load('400 196px "Mr Dafoe"'), sleep(2500)]); } catch {}
@@ -443,34 +425,11 @@ async function drawNameplate() {
     bb = text.getBBox();
     svg.setAttribute("viewBox", `0 0 640 ${Math.ceil(bb.y + bb.height + 18)}`);
   }
-  const chain = $("#plateChain"), rings = $("#plateRings");
-  chain.replaceChildren(); rings.replaceChildren();
-  const attachY = bb.y + bb.height * 0.34;
-  const L = { x: bb.x + bb.width * 0.06, y: attachY + 6 }, R = { x: bb.x + bb.width * 0.94, y: attachY - 4 };
-  const TOP = -1100;
-  for (const end of [L, R]) {
-    const outward = end === L ? -1 : 1;
-    const p = svgEl("path", { d: `M${end.x + outward * 18} ${TOP}Q${end.x + outward * 26} ${end.y - 260} ${end.x} ${end.y}` });
-    chain.append(p);
-    const len = p.getTotalLength(), step = 8.6, n = Math.floor(len / step);
-    p.remove();
-    const frag = document.createDocumentFragment();
-    for (let i = 0; i <= n; i++) {
-      const d = Math.min(len, i * step), pt = p.getPointAtLength(d), pt2 = p.getPointAtLength(Math.min(len, d + 0.5));
-      const ang = (Math.atan2(pt2.y - pt.y, pt2.x - pt.x) * 180) / Math.PI + (i % 2 ? 24 : -24);
-      frag.append(svgEl("g", { transform: `translate(${pt.x.toFixed(1)} ${pt.y.toFixed(1)}) rotate(${ang.toFixed(1)})` },
-        svgEl("ellipse", { class: "chain-shade", rx: "6.6", ry: "3.7" }),
-        svgEl("ellipse", { class: "chain-link", rx: "6.6", ry: "3.7" }),
-        svgEl("path", { class: "chain-hi", d: "M-4 -2.5Q0 -3.9 4 -2.5" })));
-    }
-    chain.append(frag);
-    rings.append(svgEl("circle", { cx: end.x.toFixed(1), cy: end.y.toFixed(1), r: "5", fill: "none", stroke: "url(#g-gold)", "stroke-width": "2.6" }));
-  }
   const gl = $("#plateGlint");
   gl.setAttribute("x", (bb.x + bb.width * 0.22 - 13).toFixed(1));
   gl.setAttribute("y", (bb.y + bb.height * 0.06).toFixed(1));
   if (reduced() || root.classList.contains("revisit")) { svg.classList.add("ready"); return; }
-  svg.classList.remove("swing"); void svg.getBoundingClientRect(); svg.classList.add("swing");
+  svg.classList.remove("enter"); void svg.getBoundingClientRect(); svg.classList.add("enter");
   svg.addEventListener("animationend", () => svg.classList.add("ready"), { once: true });
 }
 function openingShutter() {
@@ -676,7 +635,7 @@ function disconnect({ quiet = false } = {}) {
   for (const el of rowEls.values()) el.remove(); rowEls.clear();
   root.classList.add("revisit");
   go("title", { back: true });
-  if (!quiet) toast({ title: "disconnected. come back dusty", body: "Spacedust no longer sees this wallet." });
+  if (!quiet) toast({ title: "disconnected", body: "Spacedust no longer sees this wallet." });
 }
 $("#heroConnect").addEventListener("click", () => (state.account ? go("pockets") : openWallets()));
 // "just reclaim rent": works without any sellable dust; asks for a wallet first when none is connected
@@ -743,7 +702,7 @@ function renderFeeCopy() {
   }
 }
 
-/* ================= bottom bar: subtitles + the one action ================= */
+/* ================= bottom bar: the one action ================= */
 const cta = $("#cta"), ctaLabel = $("#ctaLabel"), ctaAlt = $("#ctaAlt");
 let ctaAction = null, ctaAltAction = null;
 function setCta(label, { action = null, disabled = false, busy = false, alt = null } = {}) {
@@ -780,13 +739,13 @@ function renderBar() {
   $("#ring").hidden = true;
   chip.hidden = true; chip.classList.remove("stale"); feeEl.replaceChildren(); $("#sumWorth").textContent = "";
   if (s === "title") {
-    caption("your wallet got dust. i got a duster");
-    $("#sumCount").textContent = state.account ? "your dust is waiting" : "sell your dust";
+    
+    $("#sumCount").textContent = state.account ? "wallet connected" : "sell your dust";
     feeEl.replaceChildren(h("span", {}, "read-only until you approve"));
     return state.account ? setCta("back to your dust", { action: () => go("pockets") }) : setCta("connect wallet", { action: () => openWallets() });
   }
   if (root.classList.contains("cinema-on")) {
-    caption("check the wallet. i’ll wait");
+    
     $("#sumCount").textContent = plural(state.cinemaN || 0, "transaction");
     $("#sumWorth").textContent = "· 1 wallet prompt";
     feeEl.replaceChildren(h("span", {}, "nothing sent until you approve"));
@@ -806,24 +765,24 @@ function renderBar() {
       else if (n && isBurnOut()) feeLine(feeEl, "no fee", "greent");
       else if (n && state.feeErr) feeLine(feeEl, "any fee is shown in the review", "");
     }
-    if (state.loading) { caption("turnin’ out every pocket"); return setCta("loading…", { disabled: true, busy: true }); }
+    if (state.loading) { return setCta("loading…", { disabled: true, busy: true }); }
     if (state.loadError) {
-      $("#sumCount").textContent = "couldn’t load"; caption("the pockets wouldn’t open");
+      $("#sumCount").textContent = "couldn’t load"; 
       const left = cooldownLeft();
       return left > 0 ? setCta(`try again in ${left}s`, { disabled: true }) : setCta("try again", { action: () => loadHoldings() });
     }
     if (!state.rows.length || !state.rows.some((r) => r.usd != null && !isBurnRow(r))) {
-      $("#sumCount").textContent = "nothing to dust";
+      $("#sumCount").textContent = "nothing to sell";
       // nothing to sell can still mean rent locked in empty accounts: offer that instead of a dead end
       const e = rcEmptiesMine();
-      if (e.length) { caption("spotless. but there’s rent in the lining"); return setCta(`reclaim ${solApprox(e.reduce((a, x) => a + x.rentLamports, 0))} SOL`, { action: () => openCleanup() }); }
-      caption("spotless. nothing to dust");
+      if (e.length) { return setCta(`reclaim ${solApprox(e.reduce((a, x) => a + x.rentLamports, 0))} SOL`, { action: () => openCleanup() }); }
+      
       return setCta("switch wallet", { action: () => openWallets() });
     }
-    if (!n) { caption("pick what’s collectin’ dust"); return setCta("pick some dust", { disabled: true }); }
-    if (n > MAX) { caption("that’s a lot of dust. one run at a time"); return setCta(`keep the ${MAX} largest`, { action: keepMax }); }
-    if (unverifiedOut() && !state.customAck) { caption("check that address first"); return setCta("confirm the address first", { disabled: true }); }
-    caption(isBurnOut() ? "straight to the source. no fee" : unverifiedOut() ? "double-check that address" : n >= 8 ? "found the dust in every corner" : "say less");
+    if (!n) { return setCta("pick tokens to sell", { disabled: true }); }
+    if (n > MAX) { return setCta(`keep the ${MAX} largest`, { action: keepMax }); }
+    if (unverifiedOut() && !state.customAck) { return setCta("confirm the address first", { disabled: true }); }
+    
     return setCta(`preview ${plural(n, "swap")}`, { action: () => startPreview() });
   }
 
@@ -836,10 +795,10 @@ function renderBar() {
       $("#sumCount").textContent = b.done >= b.total ? "checking…" : `routing ${lo === hi ? lo : `${lo}–${hi}`} of ${b.total}…`;
       renderOutChip(null, symOf(b.out), true);
       feeEl.replaceChildren(h("span", {}, "nothing gets signed yet"));
-      caption("findin’ every token the cleanest exit");
+      
       return setCta("building…", { disabled: true, busy: true, alt: { label: "cancel", run: cancelPreview } });
     }
-    if (!p) return setCta("back to the pockets", { action: () => go("pockets", { back: true }) });
+    if (!p) return setCta("back to your tokens", { action: () => go("pockets", { back: true }) });
     const n = p.txs.length, t = planTotals(p);
     $("#sumCount").textContent = n ? plural(n, "transaction") : "nothing to send";
     $("#sumWorth").textContent = n ? "· 1 wallet prompt" : "";
@@ -847,38 +806,38 @@ function renderBar() {
     chip.classList.toggle("stale", !!state.stale);
     if (p.feeApplied && n) feeLine(feeEl, `${p.feeBps ? pct(p.feeBps) + " fee" : "fee"} ≈ ${usd(t.feeUsd)}`, "pinkt", " · bought & burned", " · burned");
     else if (n && (fee() || p.feeApplied === false)) feeLine(feeEl, fee() ? "no fee" : "no fee on this run", "greent");
-    if (state.busy === "signing") { caption("stampin’ a fresh blockhash…"); return setCta("preparing…", { disabled: true, busy: true }); }
+    if (state.busy === "signing") { return setCta("preparing…", { disabled: true, busy: true }); }
     const left = cooldownLeft();
     if (!n && shortOfSol(p) && lamSum(rcEmptiesMine()) > 0) {
       // the rent in the wallet's empty accounts is the SOL these swaps are missing
-      caption("short on SOL. your empty pockets got some");
+      
       return setCta("get rent back", { action: () => openCleanup() });
     }
     if (!n) {
-      caption(allRateLimited(p) ? "hold up. the server needs a breather" : shortOfSol(p) ? "short on SOL. top up a little" : "nothing made the cut");
-      return setCta("back to the pockets", { action: () => go("pockets", { back: true }) });
+      
+      return setCta("back to your tokens", { action: () => go("pockets", { back: true }) });
     }
     $("#ring").hidden = false; renderRing(false);
     if (state.stale) {
-      caption("quotes went stale. fresh ones needed");
+      
       return left > 0 ? setCta(`refresh in ${left}s`, { disabled: true }) : setCta("refresh quotes", { action: () => refreshQuotes() });
     }
-    caption(unverifiedOut(p.out) ? "double-check that address" : isBurnOut(p.out) ? "lookin’ clean. no fee on this one" : "lookin’ clean. your call");
+    
     return setCta(`approve ${n} in wallet`, { action: approve });
   }
 
   if (s === "drop") {
-    const r = state.run; if (!r) return setCta("dust again", { action: dustAgain });
+    const r = state.run; if (!r) return setCta("back to your tokens", { action: dustAgain });
     if (r.kind === "reclaim") return renderReclaimDropBar(r, feeEl);
     const c = r.items.filter((i) => i.status === "confirmed").length, n = r.items.length;
     $("#sumCount").textContent = `${c} of ${n} confirmed`;
     feeEl.replaceChildren(h("span", {}, r.done ? (r.sim ? "simulated run · nothing was sent" : "your token list is refreshing") : "keep this tab open until it’s done"));
-    if (r.retrying) { caption("checkin’ what landed…"); return setCta("checking balances…", { disabled: true, busy: true }); }
-    if (!r.done) { caption("sent. waitin’ on the network…"); return setCta(`sending ${n}…`, { disabled: true, busy: true }); }
+    if (r.retrying) { return setCta("checking balances…", { disabled: true, busy: true }); }
+    if (!r.done) { return setCta(`sending ${n}…`, { disabled: true, busy: true }); }
     const failed = r.items.filter((i) => i.status !== "confirmed");
-    if (!failed.length) { caption(rcEmptiesMine().length ? "clean sweep. rent’s still in the lining" : "clean sweep. not a speck left"); return setCta("dust again", { action: dustAgain }); }
-    if (!c) { caption(failed.every((f) => f.status === "expired") ? "it expired before landing" : "nothing landed this time"); return setCta("preview again", { action: () => retryMints(failed) }); }
-    caption("mostly clean");
+    if (!failed.length) { return setCta("back to your tokens", { action: dustAgain }); }
+    if (!c) { return setCta("preview again", { action: () => retryMints(failed) }); }
+    
     return setCta(failed.length === 1 ? "preview that one again" : `preview the ${failed.length} again`, { action: () => retryMints(failed), alt: { label: "done", run: dustAgain } });
   }
 }
@@ -994,8 +953,8 @@ function setPreset(p, range) {
   invalidatePlan();
   syncRows({ flip: true }); renderPocketsMeta(); renderAside(); renderBar(); movePresetThumb();
   if (state.rows.length) toast({
-    title: `picked ${plural(state.selected.size, "token")} ${p === "all" ? "(every priced token)" : p === "custom" ? `between ${usd(state.range.min)} and ${state.range.max === Infinity ? "any value" : usd(state.range.max)}` : `under $${p}`}`,
-    body: p === "all" ? "Includes your bigger holdings. Check the list before you preview." : "Your manual picks were reset.",
+    title: p === "all" ? `order 66 your wallet: ${plural(state.selected.size, "token")} picked` : `picked ${plural(state.selected.size, "token")} ${p === "custom" ? `between ${usd(state.range.min)} and ${state.range.max === Infinity ? "any value" : usd(state.range.max)}` : `under $${p}`}`,
+    body: p === "all" ? "Every priced token, bigger holdings included. Check the list before you preview." : "Your manual picks were reset.",
     actions: [{ label: "undo", run: () => { state.selected = prevSel; state.preset = prev.preset; state.range = prev.range; syncRows({ flip: true }); renderPocketsMeta(); renderAside(); renderBar(); movePresetThumb(); } }],
   });
   if (state.selected.size > 4) react(10, 2, 900);
@@ -1152,27 +1111,27 @@ function renderPockets({ stagger = false } = {}) {
       h("span", { style: "display:grid;gap:7px" }, h("span", { class: "sk", style: `width:${70 + ((i * 37) % 60)}px` }), h("span", { class: "sk", style: `width:${120 + ((i * 53) % 70)}px;height:9px` })),
       h("span", { style: "display:grid;gap:7px;justify-items:end" }, h("span", { class: "sk", style: "width:52px" }), h("span", { class: "sk", style: "width:34px;height:9px" })))));
     $("#pkFacts").textContent = "Reading balances and prices. Nothing gets signed.";
-    $("#pk-title").textContent = "checkin’ the pockets…";
+    $("#pk-title").textContent = "loading your tokens…";
   } else if (state.loadError) {
     rowsEl.replaceChildren(); for (const el of rowEls.values()) el.remove(); rowEls.clear();
-    $("#pk-title").textContent = "couldn’t read the pockets";
+    $("#pk-title").textContent = "couldn’t load your tokens";
     $("#pkFacts").textContent = `${state.loadError} Nothing was signed or sent.`;
-    fill(pkState, stateStill(4, "the pockets are stuck shut", "Give it a moment, then try again from the bar below."),
+    fill(pkState, stateStill(4, "try again in a moment", "Use the button in the bar below, or switch wallets."),
       h("div", { class: "state-actions" }, h("button", { class: "btn-ghost sm", type: "button", onclick: () => openWallets() }, icon("wallet", "i i-sm"), "switch wallet")));
   } else if (empty) {
     rowsEl.replaceChildren(); for (const el of rowEls.values()) el.remove(); rowEls.clear();
-    $("#pk-title").textContent = "wallet’s spotless";
+    $("#pk-title").textContent = "no dust to sell";
     const unpriced = state.rows.filter((r) => r.usd == null).length;
     $("#pkFacts").textContent = state.rows.length
       ? `Nothing here has a reliable price${unpriced ? ` (${plural(unpriced, "token")} without one, listed below)` : ""}, so there’s nothing Spacedust can sell safely.`
-      : "No tokens besides SOL, so there’s nothing to dust.";
+      : "No tokens besides SOL, so there’s nothing to sell.";
     // the left-alone line sits below the card (under the bar on a phone), so the facts say it first
     const alone = (state.nftCount || 0) + (state.collectibleCount || 0);
     if (alone) $("#pkFacts").textContent += ` ${leftAlonePhrase(state.nftCount || 0, state.collectibleCount || 0)} ${alone === 1 ? "is" : "are"} left alone.`;
     const rent = rcEmptiesMine();
     if (rent.length) $("#pkFacts").textContent += ` ${plural(rent.length, "empty account")} still ${rent.length === 1 ? "holds" : "hold"} about ${solAmt(rent.reduce((a, x) => a + x.rentLamports, 0))} SOL of rent you can get back.`;
     // with rent on offer, the bar's one action is "reclaim"; the card doesn't repeat it
-    fill(pkState, rent.length ? stateStill(13, "no dust, just rent", "No dust to sell, but there’s rent in the lining. Reclaim it from the bar below.") : stateStill(13, "not a speck in sight", "Dusty checked every pocket. Come back when the airdrops pile up."),
+    fill(pkState, rent.length ? stateStill(13, "rent to reclaim", "Empty token accounts in this wallet are holding SOL. Reclaim it from the bar below.") : stateStill(13, "nothing to sell", "Check back after more small tokens land in this wallet."),
       h("div", { class: "state-actions" },
         h("button", { class: "btn-ghost sm", type: "button", onclick: () => openWallets() }, icon("wallet", "i i-sm"), "switch wallet"),
         h("button", { class: "btn-text sm", type: "button", onclick: () => loadHoldings() }, icon("refresh", "i i-sm"), "check again")));
@@ -1700,7 +1659,7 @@ function drawCut() {
   const b = state.building, p = state.plan;
   const heroEl = $("#cutHero"), list = $("#cutList"), aside = $("#cutAside"), skipEl = $("#cutSkipped"), note = $("#cutNotice"), warn = $("#cutWarn");
   $("#cutProgress").hidden = !b;
-  $("#cutBack").lastChild.textContent = b ? "cancel and go back" : "back to the pockets";
+  $("#cutBack").lastChild.textContent = b ? "cancel and go back" : "back to your tokens";
   note.hidden = !state.notice || !!b;
   if (state.notice) fill(note, icon("info"), h("span", {}, state.notice));
   const o0 = b?.out || p?.out;
@@ -1711,7 +1670,7 @@ function drawCut() {
   heroEl.classList.toggle("stale", !b && !!state.stale);
   if (b) {
     const o = b.out;
-    $("#cut-title").textContent = "polishin’ the route…";
+    $("#cut-title").textContent = "building your preview…";
     $("#cutFacts").textContent = "Quoting and simulating every swap. Nothing gets signed.";
     $("#cutFill").style.width = Math.max(4, (b.done / b.total) * 100) + "%";
     const lo = Math.min(b.done + 1, b.total), hi = Math.min(b.done + CHUNK, b.total);
@@ -1739,7 +1698,7 @@ function drawCut() {
   if (!p) return;
   const o = p.out, n = p.txs.length, t = planTotals(p), busy = !!state.busy, rl = allRateLimited(p);
   const noSol = shortOfSol(p);
-  $("#cut-title").textContent = n ? (state.stale ? "quotes went stale" : "review the cut") : rl ? "preview paused" : noSol ? "short on SOL" : "nothing made the cut";
+  $("#cut-title").textContent = n ? (state.stale ? "refresh the quotes" : "review your swaps") : rl ? "preview paused" : noSol ? "short on SOL" : "nothing to swap";
   $("#cutFacts").textContent = n && state.stale
     ? (state.staleWhy === "settings" ? "These quotes used your old protection settings. Refresh to quote again with the new ones, then approve. Nothing was sent."
       : `The oldest of these quotes is more than ${TTL_MS / 1000} seconds old, so prices may have moved. Refresh to get fresh ones, then approve. Nothing was sent.`)
@@ -1752,7 +1711,7 @@ function drawCut() {
     svgArrow(),
     h("div", { class: "ch-block ch-out" }, h("p", { class: "overline" }, "you get", state.stale && n && h("span", { class: "old-tag" }, "old quote")), h("p", { class: "ch-big" }, `≈ ${outAmt(t.receive, o)}`, h("small", {}, symOf(o))),
       h("p", { class: "ch-sub" }, t.minReceive != null ? `at least ${outAmt(t.minReceive, o)} ${symOf(o)}${p.feeApplied ? ", after the fee" : ""}` : p.feeApplied ? "after the fee" : "")));
-  fill($("#cutListLabel"), h("span", {}, `tracklist · ${plural(n, "transaction")}`), n > 0 && h("span", { class: "tl-col" }, "vs. market"));
+  fill($("#cutListLabel"), h("span", {}, plural(n, "transaction")), n > 0 && h("span", { class: "tl-col" }, "vs. market"));
   const animate = !p._shown && !reduced();
   list.replaceChildren(...t.items.map((x, i) => {
     const li = txRow(x, i, { cls: state.stale ? "stale" : "", out: o });
@@ -1760,7 +1719,7 @@ function drawCut() {
     return li;
   }));
   p._shown = true;
-  // skipped: bonus tracks, in plain words, with fixes. Identical reasons share one line.
+  // skipped: in plain words, with fixes. Identical reasons share one line.
   skipEl.hidden = !p.skipped.length;
   if (p.skipped.length) {
     const hs = p.skipped.map((s) => ({ s, hm: humanSkip(s, p) }));
@@ -1770,7 +1729,7 @@ function drawCut() {
     for (const x of hs) { const g = groups.find((gg) => gg.why === x.hm.why); if (g) g.items.push(x); else groups.push({ why: x.hm.why, items: [x] }); }
     const symList = (items) => { const s = items.map(({ s }) => tokLabel(rowBy(s.mint) || { mint: s.mint })); return s.length > 6 ? `${s.slice(0, 6).join(", ")} +${s.length - 6} more` : s.join(", "); };
     fill(skipEl,
-      h("p", { class: "overline" }, h("span", {}, `bonus tracks · skipped ${p.skipped.length}`)),
+      h("p", { class: "overline" }, h("span", {}, `skipped · ${p.skipped.length}`)),
       groups.map(({ items }, gi) => {
         const { hm } = items[0];
         return h("div", { class: "skip-row" },
@@ -1959,7 +1918,7 @@ function showCinema({ n, facts, items }) {
   if (!reduced()) { reel.currentTime = 0; reel.play().catch(() => {}); }
   $("#main").inert = true; $("#barTop").inert = true; $("#barBot").inert = true;
   c.focus({ preventScroll: true });
-  renderSlate(); renderBar();
+  renderBar();
 }
 function hideCinema(instant = false) {
   clearTimeout(hintT);
@@ -1967,7 +1926,6 @@ function hideCinema(instant = false) {
   const c = $("#cinema");
   root.classList.remove("cinema-on");
   $("#main").inert = false; $("#barTop").inert = false; $("#barBot").inert = false;
-  renderSlate();
   if (c.hidden) return;
   if (instant || reduced()) { c.hidden = true; return; }
   c.classList.add("out"); setTimeout(() => { c.hidden = true; c.classList.remove("out"); }, 300);
@@ -2036,7 +1994,7 @@ async function runSend(signed, lastValid, keptHash = []) {
   await go("drop");
   if (ep !== state.epoch) return;
   $("#stampWrap").hidden = true; $("#result").hidden = true; $("#drop-title").classList.remove("as-stamp"); showComplete(false);
-  $("#drop-title").textContent = "sendin’ it";
+  $("#drop-title").textContent = "sending";
   $("#dropFacts").textContent = `${plural(p.txs.length, "transaction")} signed. Sending them now. Each one lands on its own, so a slow one never holds up the rest.`;
   renderSimNote();
   setPose(sceneMascot("drop"), 6, { mode: "wiggle" });
@@ -2177,8 +2135,8 @@ function renderResult() {
   const title = $("#drop-title");
   if (!bad.length) {
     $("#dropFacts").textContent = `Every swap landed. About ${outAmt(recv, o)} ${symOf(o)} received (the quoted amount)${rent ? `, about ${rent.toFixed(4)} SOL of rent back` : ""}${burned ? `, ${int(burned)} ${burnSym()} burned` : ""}.`;
-    $("#stampWrap").hidden = false; title.classList.add("as-stamp"); title.textContent = "dusted: all clean";
-    $("#stampText").textContent = "dusted"; $("#stamp").classList.remove("long");
+    $("#stampWrap").hidden = false; title.classList.add("as-stamp"); title.textContent = "done: every swap landed";
+    $("#stampText").textContent = "done"; $("#stamp").classList.remove("long");
     const st = $("#stamp"); st.classList.remove("slam"); void st.offsetWidth; if (!reduced()) st.classList.add("slam");
     showComplete(true);
     feathers();
@@ -2190,14 +2148,14 @@ function renderResult() {
     showComplete(false);
     setPose(m, 1);
   } else {
-    title.classList.remove("as-stamp"); title.textContent = "mostly clean";
+    title.classList.remove("as-stamp"); title.textContent = "partly done";
     $("#dropFacts").textContent = `${bad.length} didn’t go through, and ${bad.length === 1 ? "that token is" : "those tokens are"} still in your wallet. The other ${ok.length} landed.`;
     $("#stampWrap").hidden = true;
     showComplete(false);
     setPose(m, 4);
   }
   if (!ok.length) { fill(res, h("p", { class: "result-note" }, "No swaps happened and no fee was taken. Your tokens haven’t moved.")); return; }
-  const burnStat = h("div", { class: "stat burned" }, h("p", { class: "overline pink" }, "burned"), h("p", { class: "stat-v" }, h("span", { class: "odo-host" }), h("small", {}, burnSym())), h("p", { class: "stat-s" }, "bought with the fee, gone for good"));
+  const burnStat = h("div", { class: "stat burned" }, h("p", { class: "overline pink" }, "burned"), h("p", { class: "stat-v" }, h("span", { class: "odo-host" }), h("small", {}, burnSym())), h("p", { class: "stat-s" }, "bought with the fee and burned"));
   // what the user got leads; rent and the burn sit underneath
   fill(res,
     h("div", { class: "stats" },
@@ -2430,7 +2388,7 @@ function rcBackfillNames() {
   if (state.scene === "cleanup" && !state.busy && state.rc.built && rcList().some((a) => a.tokenIfPriced && a.amount !== "0")) { state.rc.built = null; renderCleanup(); }
 }
 
-/* the empty-pockets line and card in the pockets scene, and the offer on the result */
+/* the rent line and card in the token list, and the offer on the result */
 function renderRentCard() {
   const e = rcEmptiesMine(), lam = lamSum(e), dollars = solUsd(lam);
   // The line under the title is how the offer gets seen: the card sits at the end of the aside (so nothing the user
@@ -2446,7 +2404,7 @@ function renderRentCard() {
   if (card.hidden) return;
   fill(card,
     h("div", { class: "rent-txt" },
-      h("p", { class: "overline" }, "empty pockets"),
+      h("p", { class: "overline" }, "empty accounts"),
       h("p", { class: "rent-line" }, h("b", {}, plural(e.length, "empty account")), ` holding ${solApprox(lam)} SOL of rent${dollars ? ` (≈ ${dollars})` : ""}. No fee to get it back.`)),
     h("button", { class: "btn-ghost sm", type: "button", disabled: !!state.busy, onclick: () => openCleanup() }, "reclaim", icon("arrow", "i i-sm")));
 }
@@ -2496,12 +2454,10 @@ $("#rcBack").addEventListener("click", () => {
 function renderCleanup() {
   if (state.scene !== "cleanup") return;
   const rc = state.rc;
-  $("#rcBack").lastChild.textContent = rc.building ? "cancel and go back" : rc.plan ? "back to the list" : rc.from === "pockets" ? "back to the pockets" : "to your dust";
-  $("#rcOver").textContent = rc.plan || rc.building ? "scene 02 · the sweep" : "scene 01 · the cleanup";
+  $("#rcBack").lastChild.textContent = rc.building ? "cancel and go back" : rc.plan ? "back to the list" : rc.from === "pockets" ? "back to your tokens" : "to your tokens";
   const note = $("#rcNotice");
   note.hidden = !rc.notice || !!rc.building;
   if (rc.notice) fill(note, icon("info"), h("span", {}, rc.notice));
-  renderSlate();
   const quiet = !rc.plan && !rc.building && !rc.loading && !rc.error && rc.accounts && !rcHasWork();
   // one mascot per viewport: the set piece replaces the cameo in the empty and error states
   sceneMascot("cleanup").hidden = !!quiet || (!!rc.error && !rc.accounts);
@@ -2526,9 +2482,9 @@ function drawRcPick() {
     if (rc.error) {
       $("#rc-title").textContent = "couldn’t read the accounts";
       $("#rcFacts").textContent = `${rc.error} Nothing was signed or sent.`;
-      fill(main, h("div", { class: "state-card" }, stateStill(4, "the lining’s stuck", "Give it a moment, then try again from the bar below.")));
+      fill(main, h("div", { class: "state-card" }, stateStill(4, "try again in a moment", "Use the button in the bar below.")));
     } else {
-      $("#rc-title").textContent = "checkin’ the lining…";
+      $("#rc-title").textContent = "reading your accounts…";
       $("#rcFacts").textContent = "Reading every token account, empty ones too. Nothing gets signed.";
       fill(main, h("div", { class: "rows" }, Array.from({ length: 5 }, (_, i) => h("div", { class: "row skel", "aria-hidden": "true" },
         h("span", {}), h("span", { class: "sk", style: "width:22px;height:22px;border-radius:7px" }), h("span", { class: "sk", style: "width:36px;height:36px;border-radius:50%" }),
@@ -2549,7 +2505,7 @@ function drawRcPick() {
   const blocked = rcList().filter(rcBlocked), holding = rcHolding(), lamAll = lamSum(allEmpty);
   if (!rcHasWork()) {
     hero.hidden = true; rc.built = null; rc.inputs.clear(); main.dataset.view = "";
-    $("#rc-title").textContent = "no lint here";
+    $("#rc-title").textContent = "nothing to close";
     const holds = holding.length === 1 ? "holds" : "hold";
     $("#rcFacts").textContent = blocked.length
       ? `${plural(blocked.length, "account")} can’t be closed by this wallet (the reasons are below)${holding.length ? `, and ${plural(holding.length, "other")} still ${holds} something worth keeping or selling` : ""}.`
@@ -2558,14 +2514,14 @@ function drawRcPick() {
       : alone.unchecked ? "Every account in this wallet still holds something, and some couldn’t be checked just now, so there’s nothing to close."
       : "This wallet has no token accounts besides SOL itself, so there’s nothing to close.";
     // the bar carries "back to your dust"; the card only offers what the bar doesn't
-    fill(main, h("div", { class: "state-card" }, stateStill(13, "not a speck of lint", blocked.length ? "Dusty found accounts, but this wallet isn’t allowed to close them." : "Dusty turned out every pocket. Empty accounts show up here after you sell or send tokens."),
+    fill(main, h("div", { class: "state-card" }, stateStill(13, "all clear", blocked.length ? "This wallet isn’t allowed to close the accounts it has." : "Empty accounts show up here after you sell or send tokens."),
       h("div", { class: "state-actions" }, h("button", { class: "btn-text sm", type: "button", onclick: () => loadAccounts() }, icon("refresh", "i i-sm"), "check again"))),
       rcBlockedBox(blocked), rcLeftAlone(alone));
     aside.replaceChildren();
     return;
   }
   hero.hidden = false; hero.classList.remove("compact", "stale");
-  $("#rc-title").textContent = "empty pockets";
+  $("#rc-title").textContent = "reclaim rent";
   const dollars = solUsd(lamAll);
   $("#rcFacts").textContent = allEmpty.length
     ? `${plural(allEmpty.length, "empty account")}${!nftEmpties.length ? "" : nftEmpties.length === allEmpty.length ? ` (${allEmpty.length === 1 ? "it’s" : "all"} left over from ${emptyWhat})` : ` (${nftEmpties.length.toLocaleString("en-US")} of them left over from ${emptyWhat})`} holding about ${solAmt(lamAll)} SOL of rent${dollars ? ` (≈ ${dollars})` : ""}. Closing an account sends its rent back to your wallet. No fee.${allEmpty.length > RC_MAX ? ` Up to ${RC_MAX} per run, so the first ${RC_MAX} are picked; run it again for the rest.` : ""}`
@@ -2626,7 +2582,7 @@ function drawRcPick() {
       rcBlockedBox(blocked),
       holding.length > 0 && h("p", { class: "hint rc-holding" }, [
         `${plural(holding.length, "other account")} still ${holding.length === 1 ? "holds" : "hold"} tokens the cleanup leaves alone.`,
-        big && `${big === holding.length ? (big === 1 ? "It’s" : "They’re") : `${big} ${big === 1 ? "is" : "are"}`} worth $1 or more: sell ${big === 1 ? "it" : "them"} in the pockets, which closes the account too.`,
+        big && `${big === holding.length ? (big === 1 ? "It’s" : "They’re") : `${big} ${big === 1 ? "is" : "are"}`} worth $1 or more: sell ${big === 1 ? "it" : "them"} from the token list, which closes the account too.`,
         kept && "The burn token and tokens with no decimals are never burned here."].filter(Boolean).join(" ")),
       rcLeftAlone(alone));
     rc.built = rc.accounts; main.dataset.view = "pick";
@@ -2671,9 +2627,9 @@ function rcBurnBox(burnAck) {
     h("summary", {}, icon("flame", "i i-sm pinkt rc-flame"), h("span", { id: "rcBurnSum" }), icon("chev", "i i-sm")),
     h("div", { class: "hidden-rows" },
       h("div", { class: "warn-card rc-warn", role: "group", "aria-label": "Burning is irreversible" },
-        h("p", { class: "warn-title" }, icon("warn"), "burning is forever"),
-        h("p", {}, "Burning destroys these tokens, then closes the account for its rent. It’s for spam and dead tokens. Nothing is sold, and it can’t be undone. Anything you’d rather turn into SOL, sell in the pockets instead."),
-        h("label", { class: "toggle sm" }, burnAck, h("span", { class: "tg", "aria-hidden": "true" }), h("span", {}, "I understand: burned tokens are gone for good"))),
+        h("p", { class: "warn-title" }, icon("warn"), "burning can’t be undone"),
+        h("p", {}, "Burning destroys these tokens, then closes the account for its rent. It’s for spam and dead tokens. Nothing is sold, and it can’t be undone. Anything you’d rather turn into SOL, sell from the token list instead."),
+        h("label", { class: "toggle sm" }, burnAck, h("span", { class: "tg", "aria-hidden": "true" }), h("span", {}, "I understand: burned tokens can’t be recovered"))),
       body));
   box.open = rc.burnOpen;
   // opening the section is what asks for prices (the only Jupiter call the cleanup makes before a build)
@@ -2761,7 +2717,7 @@ function rcHeroPick(picked = rcPicked()) {
   const back = picked.reduce((s, a) => s + rcBack(a), 0), dollars = solUsd(back);
   fill($("#rcHero"),
     h("div", { class: "ch-block" }, h("p", { class: "overline" }, "closing"), h("p", { class: "ch-big" }, String(picked.length), h("small", {}, picked.length === 1 ? "account" : "accounts")),
-      h("p", { class: "ch-sub" }, burns ? `${burns} burned first, for good` : wsolN ? "incl. wrapped SOL" : `of ${plural(rcList().filter(rcEmpty).length, "empty account")}`)),
+      h("p", { class: "ch-sub" }, burns ? `${burns} burned first` : wsolN ? "incl. wrapped SOL" : `of ${plural(rcList().filter(rcEmpty).length, "empty account")}`)),
     svgArrow(),
     h("div", { class: "ch-block ch-out" }, h("p", { class: "overline" }, "you get back"), h("p", { class: "ch-big" }, solApprox(back), h("small", {}, "SOL")),
       h("p", { class: "ch-sub" }, picked.length ? ["rent back", h("span", { class: "m-hide" }, " to your wallet"), " · no fee"] : "pick accounts to see the total"),
@@ -2778,7 +2734,7 @@ function rcHowCard() {
 function drawRcBuilding() {
   const b = state.rc.building, hero = $("#rcHero");
   state.rc.built = null; $("#rcMain").dataset.view = "building"; // this replaces the list; going back rebuilds it
-  $("#rc-title").textContent = "baggin’ the lint…";
+  $("#rc-title").textContent = "building the cleanup…";
   $("#rcFacts").textContent = "Re-reading every account, packing them into transactions and simulating each one. Nothing gets signed.";
   hero.hidden = false; hero.classList.add("compact"); hero.classList.remove("stale");
   fill(hero, h("p", { class: "ch-line" }, h("b", {}, plural(b.n, "account")), icon("arrow", "i"), h("b", { class: "ch-line-out" }, `${solApprox(b.back)} SOL`), h("span", {}, "back to your wallet")));
@@ -2807,7 +2763,7 @@ function rcTxLi(t, i, { right = null, note = null, gone = false, details = true 
     h("div", { style: "min-width:0" },
       h("p", { class: "who-top" }, h("span", { class: "sym" }, burns.length ? `${plural(n - burns.length, "close")} · ${burns.length} burn${burns.length === 1 ? "" : "s"}` : plural(n, "close"))),
       h("p", { class: "tx-flow" }, h("span", {}, names), icon("arrow", "i"), h("b", { class: gone ? "gone" : null }, `+${solAmt(t.lamports)} SOL`), gone && h("span", { class: "gone-l" }, " · not received")),
-      burns.length > 0 && h("p", { class: "tx-burn" }, icon("flame", "i"), `burns ${burns.map(rcLabel).join(", ")} for good`)),
+      burns.length > 0 && h("p", { class: "tx-burn" }, icon("flame", "i"), `burns ${burns.map(rcLabel).join(", ")}`)),
     right || h("div", { class: "tx-right" }),
     details && h("details", {}, h("summary", {}, `${plural(n, "account")}`), h("ul", { class: "rc-accts" }, accts.map((a) => h("li", {},
       h("span", { class: "rc-a-name" }, rcLabel(a)), h("span", { class: "mono" }, short(a.address)),
@@ -2820,7 +2776,7 @@ function drawRcReview() {
   const back = p.txs.reduce((s, t) => s + t.lamports, 0), accts = p.txs.reduce((s, t) => s + t.accounts.length, 0);
   const burns = p.txs.reduce((s, t) => s + t.accounts.filter((a) => a.action !== "close").length, 0), unwrap = p.txs.some((t) => t.accounts.some((a) => a.native));
   const fee = p.txs.reduce((s, t) => s + t.feeLamports, 0);
-  $("#rc-title").textContent = n ? "review the sweep" : "nothing made the cut";
+  $("#rc-title").textContent = n ? "review the cleanup" : "nothing to close";
   $("#rcFacts").textContent = n
     ? `${plural(accts, "account")} in ${plural(n, "transaction")}. Your wallet will ask once${n > 1 ? ` for all ${n}` : ""}.${p.skipped.length ? ` Another ${p.skipped.length} ${p.skipped.length === 1 ? "was" : "were"} skipped (reasons below).` : ""}`
     : "None of these accounts could be closed right now. Nothing was built or signed. Reasons are below.";
@@ -2836,7 +2792,7 @@ function drawRcReview() {
     const groups = [];
     for (const s of p.skipped) { const g = groups.find((x) => x.reason === s.reason); if (g) g.items.push(s); else groups.push({ reason: s.reason, items: [s] }); }
     const nameOf = (s) => { const a = rcAcc(s.address); return a ? rcLabel(a) : short(s.address); };
-    return h("div", { class: "skipped" }, h("p", { class: "overline" }, h("span", {}, `bonus tracks · skipped ${p.skipped.length}`)),
+    return h("div", { class: "skipped" }, h("p", { class: "overline" }, h("span", {}, `skipped · ${p.skipped.length}`)),
       groups.map((g, gi) => {
         const nm = g.items.map(nameOf);
         return h("div", { class: "skip-row" }, h("span", { class: "tno" }, pad2(n + gi)),
@@ -2846,7 +2802,7 @@ function drawRcReview() {
       }));
   })();
   fill($("#rcMain"),
-    h("div", { class: "overline list-label" }, h("span", {}, `tracklist · ${plural(n, "transaction")}`)),
+    h("div", { class: "overline list-label" }, h("span", {}, plural(n, "transaction"))),
     h("ol", { class: "tx-list" }, p.txs.map((t, i) => {
       const li = rcTxLi(t, i);
       if (!p._shown && !reduced()) li.animate([{ opacity: 0, translate: "0 8px" }, { opacity: 1, translate: "0 0" }], { duration: 380, delay: Math.min(i, 14) * 35, easing: "cubic-bezier(.2,.8,.2,1)", fill: "backwards" });
@@ -2878,7 +2834,7 @@ function renderCleanupBar(feeEl) {
   if (rc.building) {
     $("#sumCount").textContent = "checking…"; $("#sumWorth").textContent = `${solApprox(rc.building.back)} SOL back`;
     feeEl.replaceChildren(h("span", {}, "nothing gets signed yet"));
-    caption("baggin’ up the lint");
+    
     return setCta("building…", { disabled: true, busy: true, alt: { label: "cancel", run: rcCancelBuild } });
   }
   if (rc.plan) {
@@ -2887,33 +2843,33 @@ function renderCleanupBar(feeEl) {
     const planBack = rc.plan.txs.reduce((s, t) => s + t.lamports, 0);
     $("#sumWorth").textContent = n ? `${solApprox(planBack)} SOL back` : "";
     if (n) noFee(planBack);
-    if (state.busy === "signing") { caption("stampin’ a fresh blockhash…"); return setCta("preparing…", { disabled: true, busy: true }); }
-    if (!n) { caption("nothing made the cut"); return setCta("back to the list", { action: rcBackToList }); }
-    caption(rc.plan.burns ? "lint’s bagged. burns are final, your call" : "lint’s bagged. your call");
+    if (state.busy === "signing") { return setCta("preparing…", { disabled: true, busy: true }); }
+    if (!n) { return setCta("back to the list", { action: rcBackToList }); }
+    
     return setCta(`approve ${n} in wallet`, { action: approveReclaim });
   }
   if (!rc.accounts) {
     if (rc.error) {
-      $("#sumCount").textContent = "couldn’t load"; caption("the lining wouldn’t give");
+      $("#sumCount").textContent = "couldn’t load"; 
       feeEl.replaceChildren(h("span", {}, "nothing was signed or sent"));
       const left = cooldownLeft();
       return left > 0 ? setCta(`try again in ${left}s`, { disabled: true }) : setCta("try again", { action: () => loadAccounts() });
     }
     $("#sumCount").textContent = "reading accounts…"; feeEl.replaceChildren(h("span", {}, "nothing gets signed"));
-    caption("checkin’ the lining");
+    
     return setCta("loading…", { disabled: true, busy: true });
   }
   const picked = rcPicked(), n = picked.length, burns = picked.filter((a) => rc.burnSel.has(a.address)).length;
   if (!rcHasWork()) {
     $("#sumCount").textContent = "nothing to close"; feeEl.replaceChildren(h("span", {}, "nothing was signed or sent"));
-    caption("not a speck of lint");
+    
     return setCta("back to your dust", { action: leaveCleanup });
   }
   $("#sumCount").textContent = n ? plural(n, "account") : "nothing picked";
   $("#sumWorth").textContent = n ? `${solApprox(rcTotal())} SOL back` : "";
   noFee(n ? rcTotal() : 0);
-  if (!n) { caption("pick the empty pockets"); return setCta("pick some accounts", { disabled: true }); }
-  caption(burns ? "burns are final. double-check the list" : n >= 50 ? "that’s a lot of empty pockets" : "every empty pocket’s sittin’ on rent. let’s get it back");
+  if (!n) { return setCta("pick some accounts", { disabled: true }); }
+  
   return setCta(burns ? `review ${n} · ${burns} burn${burns === 1 ? "" : "s"}` : `review ${plural(n, "close")}`, { action: () => buildReclaim() });
 }
 
@@ -3036,7 +2992,7 @@ async function runReclaimSend(signed, lastValid, keptHash = []) {
   await go("drop");
   if (ep !== state.epoch) return;
   $("#stampWrap").hidden = true; $("#result").hidden = true; $("#drop-title").classList.remove("as-stamp"); showComplete(false);
-  $("#drop-title").textContent = "sendin’ it";
+  $("#drop-title").textContent = "sending";
   $("#dropFacts").textContent = `${plural(p.txs.length, "transaction")} signed. Sending them now. Each one lands on its own, so a slow one never holds up the rest.`;
   renderSimNote();
   setPose(sceneMascot("drop"), 6, { mode: "wiggle" });
@@ -3080,8 +3036,8 @@ function renderReclaimResult() {
   const m = sceneMascot("drop"), title = $("#drop-title");
   if (!bad.length) {
     $("#dropFacts").textContent = `Every transaction landed. About ${solAmt(back)} SOL is back in your wallet from ${plural(closed, "closed account")}${burned ? `, with ${plural(burned, "dust token")} burned on the way` : ""}. No fee.`;
-    $("#stampWrap").hidden = false; title.classList.add("as-stamp"); title.textContent = "rent’s back: all aired out";
-    $("#stampText").textContent = "rent’s back"; $("#stamp").classList.add("long");
+    $("#stampWrap").hidden = false; title.classList.add("as-stamp"); title.textContent = "done: rent reclaimed";
+    $("#stampText").textContent = "done"; $("#stamp").classList.remove("long");
     const st = $("#stamp"); st.classList.remove("slam"); void st.offsetWidth; if (!reduced()) st.classList.add("slam");
     showComplete(true);
     feathers();
@@ -3093,7 +3049,7 @@ function renderReclaimResult() {
     showComplete(false);
     setPose(m, 1);
   } else {
-    title.classList.remove("as-stamp"); title.textContent = "mostly aired out";
+    title.classList.remove("as-stamp"); title.textContent = "partly done";
     $("#dropFacts").textContent = `${plural(bad.length, "transaction")} didn’t go through, so ${bad.length === 1 ? "its accounts are" : "their accounts are"} still open. The other ${ok.length} landed: about ${solAmt(back)} SOL is back.`;
     $("#stampWrap").hidden = true;
     showComplete(false);
@@ -3104,7 +3060,7 @@ function renderReclaimResult() {
   fill(res,
     h("div", { class: "stats" }, backStat,
       h("div", { class: "stat" }, h("p", { class: "overline" }, "closed"), h("p", { class: "stat-v" }, String(closed), h("small", {}, closed === 1 ? "account" : "accounts")), h("p", { class: "stat-s" }, `in ${plural(ok.length, "transaction")}`)),
-      burned ? h("div", { class: "stat burned" }, h("p", { class: "overline pink" }, "burned"), h("p", { class: "stat-v" }, String(burned), h("small", {}, burned === 1 ? "token" : "tokens")), h("p", { class: "stat-s" }, "dust gone for good"))
+      burned ? h("div", { class: "stat burned" }, h("p", { class: "overline pink" }, "burned"), h("p", { class: "stat-v" }, String(burned), h("small", {}, burned === 1 ? "token" : "tokens")), h("p", { class: "stat-s" }, "burned and closed"))
         : h("div", { class: "stat" }, h("p", { class: "overline" }, "fee"), h("p", { class: "stat-v" }, "0"), h("p", { class: "stat-s" }, "no fee on the cleanup"))),
     h("div", { class: "result-actions" }, h("button", { class: "btn-ghost sm", type: "button", onclick: rcCopySummary }, icon("copy", "i i-sm"), "copy summary"), h("span", { id: "resRc", class: "res-rc" })),
     bad.length > 0 && h("p", { class: "result-note" }, "“Try again” rebuilds just the accounts that are still open. The ones that closed are done. Failed transactions cost only the network fee; expired ones cost nothing."));
@@ -3115,13 +3071,13 @@ function renderReclaimDropBar(r, feeEl) {
   const items = r.items, n = items.length, c = items.filter((i) => i.status === "confirmed").length;
   $("#sumCount").textContent = `${c} of ${n} confirmed`;
   feeEl.replaceChildren(h("span", {}, r.done ? (r.sim ? "simulated run · nothing was sent" : "no fee · your accounts are refreshing") : "keep this tab open until it’s done"));
-  if (!r.done) { caption("sent. waitin’ on the network…"); return setCta(`sending ${n}…`, { disabled: true, busy: true }); }
+  if (!r.done) { return setCta(`sending ${n}…`, { disabled: true, busy: true }); }
   const failed = items.filter((i) => i.status !== "confirmed");
   const more = rcEmptiesMine().length;
-  if (!failed.length) { caption(more ? "rent’s back. more pockets to air out" : "rent’s back. pockets aired out"); return setCta("back to your dust", { action: dustAgain, alt: more ? { label: "clean up more", run: () => openCleanup(), wide: true } : null }); }
+  if (!failed.length) { return setCta("back to your dust", { action: dustAgain, alt: more ? { label: "clean up more", run: () => openCleanup(), wide: true } : null }); }
   const retry = () => rcRetry(failed);
-  if (!c) { caption(failed.every((f) => f.status === "expired" || f.status === "never") ? "it expired before landing" : "nothing closed this time"); return setCta("try again", { action: retry, alt: { label: "done", run: dustAgain } }); }
-  caption("mostly aired out");
+  if (!c) { return setCta("try again", { action: retry, alt: { label: "done", run: dustAgain } }); }
+  
   return setCta(failed.length === 1 ? "try that one again" : `try the ${failed.length} again`, { action: retry, alt: { label: "done", run: dustAgain } });
 }
 // a retry is always a fresh read and a fresh build of what didn't close
@@ -3165,7 +3121,7 @@ if (DEV_REQ) {
 }
 buildPresets();
 buildStill();
-renderSlate(); renderBar(); renderSetSummary();
+renderBar(); renderSetSummary();
 openingShutter();
 drawNameplate();
 window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: registry }));

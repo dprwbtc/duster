@@ -30,7 +30,6 @@
       <stop offset="0" stop-color="#FFF6D6"/><stop offset=".22" stop-color="#F4CE7F"/><stop offset=".5" stop-color="#DEB25F"/>
       <stop offset=".72" stop-color="#9E6C25"/><stop offset=".9" stop-color="#E6BE6E"/><stop offset="1" stop-color="#FCE9B4"/>
     </linearGradient>
-    <linearGradient id="g-gold-d" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FCE9B4"/><stop offset=".45" stop-color="#DEB25F"/><stop offset="1" stop-color="#7A4F17"/></linearGradient>
     <linearGradient id="gChrome" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F9EEDB"/><stop offset=".45" stop-color="#919191"/><stop offset=".7" stop-color="#3C3A38"/><stop offset="1" stop-color="#CFCAC2"/></linearGradient>
     <linearGradient id="gGold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FAFAC8"/><stop offset=".35" stop-color="#F4CE7F"/><stop offset=".65" stop-color="#DEB25F"/><stop offset="1" stop-color="#9E6C25"/></linearGradient>
     <linearGradient id="gRed" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb4ad"/><stop offset=".5" stop-color="#FF4B3E"/><stop offset="1" stop-color="#8C2322"/></linearGradient>
@@ -69,11 +68,6 @@
 <header class="bar bar-top" id="barTop">
   <div class="bar-in">
     <a class="brand" href="/dust" id="brand" aria-label="spacedust, back to the start"><span class="brand-script" aria-hidden="true">spacedust</span><span class="brand-dot" aria-hidden="true"></span></a>
-    <div class="slate" id="slate" aria-hidden="true">
-      <span class="slate-num" id="slateNum">sc. 00</span>
-      <span class="slate-name" id="slateName">title</span>
-      <span class="slate-ticks" id="slateTicks"><i></i><i></i><i></i><i></i></span>
-    </div>
     <div class="bar-right" id="barRight">
       <button class="wallet-chip" id="walletChip" type="button" popovertarget="walletPop" hidden>
         <span class="idn" id="walletIdn" aria-hidden="true"></span>
@@ -87,7 +81,7 @@
 
 <main class="picture" id="main" tabindex="-1">
 
-  <!-- ===================== SC. 00 · TITLE ===================== -->
+  <!-- ===================== TITLE ===================== -->
   <section class="scene scene-opening" data-scene="title" aria-labelledby="t-title">
     <div class="hero">
       <div class="still" aria-hidden="true">
@@ -106,14 +100,11 @@
         <h1 id="t-title" class="plate">
           <span class="sr">spacedust</span>
           <svg class="plate-svg" id="plateSvg" viewBox="0 0 640 262" aria-hidden="true" focusable="false">
-            <g id="plateChain"></g>
             <text id="plateText" x="320" y="214" text-anchor="middle" class="plate-text" fill="url(#g-gold)" filter="url(#f-bevel)">spacedust</text>
-            <g id="plateRings"></g>
             <use href="#i-spark" class="plate-glint" id="plateGlint" width="26" height="26" x="0" y="0"/>
           </svg>
         </h1>
-        <p class="overline credit">lil vader presents</p>
-        <p class="tagline">sell all your dust in <em>one</em> wallet prompt</p>
+        <p class="tagline">lil vader hates sand, and dust. let’s clean up your wallet.</p>
         <p class="facts hero-facts" id="heroFacts">Pick up to 30 small tokens and swap them into SOL, USDC or USDT. Each token gets its own transaction, and your wallet asks once for all of them.</p>
         <div class="cta-row">
           <button class="btn-gold lg" id="heroConnect" type="button"><span>connect wallet</span><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button>
@@ -123,21 +114,18 @@
       </div>
 
       <div class="hero-stage">
-        <button class="mascot mascot-hero" id="heroMascot" type="button" aria-label="Dusty the droid. Tap to say hi">
+        <button class="mascot mascot-hero" id="heroMascot" type="button" aria-label="Dusty the droid">
           <span class="m-glow" aria-hidden="true"></span>
           <img src="/img/dusty/pose-02.webp" width="246" height="326" alt="" decoding="async" fetchpriority="low">
           <span class="m-rim" aria-hidden="true"></span>
-          <span class="bubble" aria-hidden="true">boop</span>
         </button>
-        <div class="nametag" aria-hidden="true"><span class="nt-top"><b>hello</b><small>my name is</small></span><span class="nt-name">dusty</span></div>
       </div>
-      <a class="scroll-cue" href="#liner"><span>liner notes</span><svg class="i i-sm" aria-hidden="true"><use href="#i-chev"/></svg></a>
+      <a class="scroll-cue" href="#liner"><span>how it works</span><svg class="i i-sm" aria-hidden="true"><use href="#i-chev"/></svg></a>
     </div>
 
     <div class="liner" id="liner">
       <div class="wrap">
-        <p class="overline">tracklist</p>
-        <h2 class="liner-title">how it plays</h2>
+        <h2 class="sr">How it works</h2>
         <ol class="liner-tracks">
           <li><span class="tn">01</span><div><h3>connect</h3><p>Read-only. Spacedust looks at your token balances and prices. Nothing gets signed.</p></div></li>
           <li><span class="tn">02</span><div><h3>pick your dust</h3><p>Everything under $2 is picked for you. Change the range, search, or untick anything. Up to 30 per run.</p></div></li>
@@ -146,13 +134,13 @@
 
         <div class="liner-grid">
           <div class="liner-burn frame" id="linerBurn" hidden>
-            <p class="overline pink">the burn</p>
+            <p class="overline pink">fee</p>
             <h3 class="liner-h" id="linerBurnTitle">1% fee, bought and burned</h3>
             <p id="linerBurnText"></p>
             <div class="mint-row"><span class="mono mint-full" id="linerMint"></span><button class="icon-btn" type="button" data-copy="mint" aria-label="Copy the burn token mint address"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg></button></div>
           </div>
           <div class="liner-fine">
-            <p class="overline">the fine print</p>
+            <p class="overline">fine print</p>
             <p><b>Non-custodial.</b> Spacedust never holds your funds or keys. It builds transactions with Jupiter routing, simulates every one, and your wallet signs them. Check the balance changes your wallet shows before you approve.</p>
             <p><b>Risks.</b> Swaps are final. Dust tokens often have little liquidity, and unverified tokens may be scams. Swaps that would lose more than your loss limit are skipped, but prices can still move. Provided as-is, with no warranty. Use at your own risk.</p>
             <p id="feeFine" hidden></p>
@@ -161,36 +149,28 @@
 
         <div class="liner-cleanup frame" id="linerCleanup">
           <div>
-            <p class="overline green">the cleanup · no fee</p>
-            <h3 class="liner-h">your rent, back</h3>
+            <p class="overline green">rent · no fee</p>
+            <h3 class="liner-h">get your rent back</h3>
             <p>Every token account locks about 0.002 SOL of rent, even after it’s empty. Spacedust closes the empty ones and sends that SOL back to your wallet, about 25 accounts per transaction, all in one prompt. Spacedust adds no fee. Dust under $1 can be burned and closed too, but only if you pick it.</p>
           </div>
           <button class="btn-ghost" type="button" data-reclaim>just reclaim rent<svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button>
         </div>
 
-        <div class="credits">
-          <p><span>starring</span> <span>dusty</span></p>
-          <p><span>routing</span> <span>Jupiter</span></p>
-          <p><span>signatures</span> <span>your wallet, every time</span></p>
-          <p><span>soundtrack</span> <span>lil vader</span></p>
-        </div>
       </div>
     </div>
   </section>
 
-  <!-- ===================== SC. 01 · THE POCKETS ===================== -->
+  <!-- ===================== TOKEN LIST ===================== -->
   <section class="scene" data-scene="pockets" aria-labelledby="pk-title" hidden>
     <div class="wrap">
       <header class="scene-head">
         <div class="sh-text">
-          <p class="overline">scene 01 · the pockets</p>
           <h2 class="scene-title" id="pk-title">pick your dust</h2>
           <p class="facts" id="pkFacts" aria-live="polite"></p>
           <p class="pk-rentline" id="pkRentLine" hidden></p>
         </div>
-        <button class="mascot mascot-cameo" type="button" data-mascot aria-label="Dusty the droid. Tap to say hi">
+        <button class="mascot mascot-cameo" type="button" data-mascot aria-label="Dusty the droid">
           <img width="254" height="334" alt="" decoding="async">
-          <span class="bubble" aria-hidden="true">boop</span>
         </button>
       </header>
 
@@ -231,7 +211,7 @@
 
         <aside class="pk-aside" aria-label="What you get">
           <div class="aside-block into" id="intoBlock">
-            <p class="overline">dust into</p>
+            <p class="overline">swap into</p>
             <div class="into-grid" id="intoGrid" role="radiogroup" aria-label="Swap into"></div>
             <div class="into-custom" id="intoCustom" hidden></div>
             <button class="btn-text sm other-btn" type="button" id="otherBtn" popovertarget="outPop"><svg class="i i-sm" aria-hidden="true"><use href="#i-search"/></svg>other token…</button>
@@ -251,19 +231,17 @@
     </div>
   </section>
 
-  <!-- ===================== SC. 01 · THE CLEANUP (rent reclaim; its review is SC. 02 · the sweep) ===================== -->
+  <!-- ===================== RENT RECLAIM (list, then its review) ===================== -->
   <section class="scene" data-scene="cleanup" aria-labelledby="rc-title" hidden>
     <div class="wrap">
       <header class="scene-head">
         <div class="sh-text">
-          <button class="back-link" type="button" id="rcBack"><svg class="i i-sm" aria-hidden="true"><use href="#i-back"/></svg>back to the pockets</button>
-          <p class="overline" id="rcOver">scene 01 · the cleanup</p>
-          <h2 class="scene-title" id="rc-title">empty pockets</h2>
+          <button class="back-link" type="button" id="rcBack"><svg class="i i-sm" aria-hidden="true"><use href="#i-back"/></svg>back to your tokens</button>
+          <h2 class="scene-title" id="rc-title">reclaim rent</h2>
           <p class="facts" id="rcFacts" aria-live="polite"></p>
         </div>
-        <button class="mascot mascot-cameo" type="button" data-mascot aria-label="Dusty the droid. Tap to say hi">
+        <button class="mascot mascot-cameo" type="button" data-mascot aria-label="Dusty the droid">
           <img width="254" height="334" alt="" decoding="async">
-          <span class="bubble" aria-hidden="true">boop</span>
         </button>
       </header>
 
@@ -277,19 +255,17 @@
     </div>
   </section>
 
-  <!-- ===================== SC. 02 · THE CUT ===================== -->
+  <!-- ===================== REVIEW ===================== -->
   <section class="scene" data-scene="cut" aria-labelledby="cut-title" hidden>
     <div class="wrap">
       <header class="scene-head">
         <div class="sh-text">
-          <button class="back-link" type="button" id="cutBack"><svg class="i i-sm" aria-hidden="true"><use href="#i-back"/></svg>back to the pockets</button>
-          <p class="overline">scene 02 · the cut</p>
-          <h2 class="scene-title" id="cut-title">review the cut</h2>
+          <button class="back-link" type="button" id="cutBack"><svg class="i i-sm" aria-hidden="true"><use href="#i-back"/></svg>back to your tokens</button>
+          <h2 class="scene-title" id="cut-title">review</h2>
           <p class="facts" id="cutFacts" aria-live="polite"></p>
         </div>
-        <button class="mascot mascot-cameo" type="button" data-mascot aria-label="Dusty the droid. Tap to say hi">
+        <button class="mascot mascot-cameo" type="button" data-mascot aria-label="Dusty the droid">
           <img width="231" height="330" alt="" decoding="async">
-          <span class="bubble" aria-hidden="true">boop</span>
         </button>
       </header>
 
@@ -299,7 +275,7 @@
 
       <div class="cut-grid">
         <div class="cut-main">
-          <div class="overline list-label" id="cutListLabel">tracklist</div>
+          <div class="overline list-label" id="cutListLabel">swaps</div>
           <div class="progress" id="cutProgress" hidden>
             <div class="progress-track"><span class="progress-fill" id="cutFill"></span></div>
             <p class="progress-label" id="cutProgLabel"></p>
@@ -312,23 +288,21 @@
     </div>
   </section>
 
-  <!-- ===================== SC. 04 · THE DROP ===================== -->
+  <!-- ===================== SENDING AND RESULTS ===================== -->
   <section class="scene" data-scene="drop" aria-labelledby="drop-title" hidden>
     <div class="wrap">
       <header class="scene-head">
         <div class="sh-text">
-          <p class="overline" id="dropOver">scene 04 · the drop</p>
-          <h2 class="scene-title" id="drop-title">sendin’ it</h2>
+          <h2 class="scene-title" id="drop-title">sending</h2>
           <div class="stamp-wrap" id="stampWrap" hidden>
-            <p class="stamp" id="stamp" aria-hidden="true"><span class="script-gold" id="stampText">dusted</span>
+            <p class="stamp" id="stamp" aria-hidden="true"><span class="script-gold" id="stampText">done</span>
               <svg class="swash" viewBox="0 0 420 60" aria-hidden="true"><path d="M8 40c40-14 96-22 170-20 62 2 118 10 168 6 30-2 52-10 60-20-4 16-30 28-70 32-54 6-110-4-170-6-58-2-104 4-150 14" fill="none" stroke="url(#swashGrad)" stroke-width="3.2" stroke-linecap="round"/></svg>
             </p>
           </div>
           <p class="facts" id="dropFacts" aria-live="polite"></p>
         </div>
-        <button class="mascot mascot-cameo" type="button" data-mascot aria-label="Dusty the droid. Tap to say hi">
+        <button class="mascot mascot-cameo" type="button" data-mascot aria-label="Dusty the droid">
           <img width="252" height="326" alt="" decoding="async">
-          <span class="bubble" aria-hidden="true">boop</span>
         </button>
         <img class="complete-art" id="completeArt" width="548" height="564" alt="Dusty the droid next to a stack of SOL coins" decoding="async" hidden>
       </header>
@@ -342,16 +316,15 @@
 
       <div class="result" id="result" hidden></div>
 
-      <p class="overline run-label">the run</p>
+      <p class="overline run-label">transactions</p>
       <ol class="tx-list run" id="runList"></ol>
     </div>
   </section>
 </main>
 
-<!-- ============ bottom letterbox bar: subtitles + the one action ============ -->
+<!-- ============ bottom letterbox bar: the one action ============ -->
 <footer class="bar bar-bot" id="barBot">
   <div class="bar-in">
-    <p class="subtitle" id="subtitle" aria-hidden="true"></p>
     <div class="action" id="action">
       <div class="sum" id="sum">
         <p class="sum-main"><span class="sum-count" id="sumCount"></span><span class="sum-worth" id="sumWorth"></span></p>
@@ -377,7 +350,6 @@
         <source src="/video/dusting.webm" type="video/webm">
       </video>
     </div>
-    <p class="overline">scene 03 · your move</p>
     <p class="cinema-cap" id="cinemaCap">check your wallet</p>
     <p class="facts" id="cinemaFacts" role="status"></p>
     <ul class="ask-list" id="cinemaList"></ul>
@@ -394,7 +366,6 @@
   <div class="sheet-in">
     <div class="sheet-head">
       <div>
-        <p class="overline">cast</p>
         <h2 class="sheet-title" id="wd-title">pick your wallet</h2>
       </div>
       <button class="icon-btn" type="button" data-close aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
@@ -405,7 +376,7 @@
 
 <!-- ============ popovers ============ -->
 <div popover id="outPop" class="pop pop-out" role="dialog" aria-label="Swap into">
-  <div class="pop-head"><p class="pop-title">dust into</p><button class="icon-btn pop-x" type="button" popovertarget="outPop" popovertargetaction="hide" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <div class="pop-head"><p class="pop-title">swap into</p><button class="icon-btn pop-x" type="button" popovertarget="outPop" popovertargetaction="hide" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
   <div class="out-list" id="outList"></div>
   <div class="combo">
     <label class="search">
