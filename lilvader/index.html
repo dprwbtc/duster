@@ -14,8 +14,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=Grenze+Gotisch:wght@700..900&family=IBM+Plex+Mono:wght@400;500&family=Mrs+Saint+Delafield&display=swap">
 <style>
-/* Layout: a music-video still on the right (a face in the dark: only the eyes, the grill, the ink and the chain catch
-   the light), the title card and links on the left; below it a grill divider, the contract, Duster, and the fine print. */
+/* Layout: a full-bleed 3D stage (a face in the dark: only the eyes, the grill, the ink and the chain catch the light)
+   with the title card and links over its left side; below it the contract, Duster, and the fine print. */
 :root {
   --void: #07070a;        /* the room the video was shot in */
   --smoke: #14131a;       /* raised surfaces */
@@ -30,6 +30,8 @@
   --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --chrome-grad: linear-gradient(180deg, #ffffff 0%, #eef0f4 20%, #a3a9b4 44%, #383c45 52%, #c7ccd4 61%, #ffffff 80%, #8a909b 100%);
   --silver-btn: linear-gradient(180deg, #ffffff 0%, #eceef2 46%, #c9cdd5 54%, #e9ecf0 100%);
+  --gutter: clamp(16px, 4vw, 56px);
+  --edge: calc(var(--gutter) + max(0px, (100vw - 2 * var(--gutter) - 1180px) / 2));
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -41,7 +43,7 @@ body {
   font-size: 16px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
-  padding-inline: clamp(16px, 4vw, 56px);
+  padding-inline: var(--gutter);
   padding-block: 0 48px;
   overflow-x: hidden;
 }
@@ -53,7 +55,7 @@ a { color: inherit; }
 .bar {
   display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
   padding-block: 20px; border-bottom: 1px solid var(--gunmetal);
-  font-family: var(--body); font-stretch: 75%; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; font-size: 12px;
+  font-stretch: 75%; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; font-size: 12px;
 }
 .mark { display: flex; align-items: center; gap: 10px; text-decoration: none; }
 .mark b { font-family: var(--display); font-size: 26px; letter-spacing: 0; text-transform: none; font-weight: 800;
@@ -61,9 +63,26 @@ a { color: inherit; }
 .cto { display: inline-flex; align-items: center; gap: 8px; color: var(--steel); }
 .cto i { width: 8px; height: 8px; border-radius: 50%; background: var(--blood); box-shadow: 0 0 10px var(--blood); }
 
-/* ---------- hero ---------- */
-.hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: clamp(28px, 5vw, 72px); align-items: center; padding-block: clamp(32px, 6vw, 72px); }
-.copy { min-width: 0; display: grid; gap: 22px; }
+/* ---------- the stage ---------- */
+.stage { position: relative; margin-inline: calc(var(--gutter) * -1); margin-bottom: clamp(32px, 5vw, 64px); }
+.viewport {
+  position: relative; overflow: hidden; width: 100%; max-width: 100%;
+  background: radial-gradient(60% 55% at 62% 45%, rgba(118, 72, 30, .35), transparent 70%), #050507;
+}
+.viewport canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.lb { position: absolute; inset-inline: 0; height: 44px; background: #000; display: flex; align-items: center; gap: 12px; padding-inline: var(--edge); z-index: 3; font-family: var(--mono); font-size: 12px; color: var(--steel); }
+.lb.top { top: 0; justify-content: space-between; }
+.lb.bottom { bottom: 0; justify-content: center; }
+.prompt { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prompt::before { content: "prompt ›"; color: var(--sith); margin-right: 8px; }
+.caret { display: inline-block; width: .55em; height: 1.05em; vertical-align: -.15em; background: var(--chrome); margin-left: 3px; animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.rec { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--chrome); }
+.rec i { width: 7px; height: 7px; border-radius: 50%; background: var(--blood); animation: blink 1.6s steps(1) infinite; }
+.caption { font-family: var(--body); font-stretch: 85%; font-weight: 600; font-size: 14px; color: #fff; background: rgba(0,0,0,.55); padding: 2px 10px; letter-spacing: .02em; }
+.tag-ai { position: absolute; z-index: 3; right: var(--edge); top: 60px; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; color: var(--steel); border: 1px solid #33363f; padding: 3px 6px; border-radius: 3px; background: rgba(0,0,0,.4); }
+
+.copy { display: grid; gap: 22px; min-width: 0; }
 .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; color: var(--steel); text-transform: uppercase; }
 .eyebrow em { font-style: normal; color: var(--sith); }
 h1 {
@@ -73,22 +92,23 @@ h1 {
   background-size: 260% 100%, 100% 100%; background-position: 160% 0, 0 0; background-repeat: no-repeat;
   -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 3px 0 #000) drop-shadow(0 0 28px rgba(233,236,241,.10));
-  animation: sheen 2.6s cubic-bezier(.3,.6,.2,1) .5s 1 both;
+  animation: sheen 2.6s cubic-bezier(.3,.6,.2,1) 1.1s 1 both;
   padding-bottom: .06em;
 }
 h1:hover { animation: sheen 1.6s cubic-bezier(.3,.6,.2,1) 0s 1 both; }
 @keyframes sheen { from { background-position: 160% 0, 0 0; } to { background-position: -60% 0, 0 0; } }
 .ticker { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-.ticker strong { font-family: var(--mono); font-weight: 500; font-size: 15px; letter-spacing: .12em; padding: 4px 10px; border: 1px solid var(--gunmetal); border-radius: 3px; color: var(--chrome); }
+.ticker strong { font-family: var(--mono); font-weight: 500; font-size: 15px; letter-spacing: .12em; padding: 4px 10px; border: 1px solid #3a3d46; border-radius: 3px; color: var(--chrome); background: rgba(7,7,10,.5); }
 .ticker span { font-family: var(--ink); font-size: clamp(1.9rem, 3.4vw, 2.5rem); color: var(--steel); line-height: 1; transform: rotate(-3deg); }
-.lede { margin: 0; max-width: 34em; font-size: 18px; color: #c9cdd5; }
+.lede { margin: 0; max-width: 31em; font-size: 18px; color: #c9cdd5; }
 .lede b { color: var(--chrome); font-weight: 700; }
 
 /* links */
-.links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-width: 560px; }
 .btn {
   display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px 16px; border-radius: 6px; text-decoration: none;
-  border: 1px solid var(--gunmetal); background: linear-gradient(180deg, #17171e, #0e0e13);
+  border: 1px solid #30333c; background: linear-gradient(180deg, rgba(23,23,30,.86), rgba(12,12,16,.86));
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
   transition: border-color .2s, transform .2s, box-shadow .2s;
 }
 .btn:hover { border-color: #5b616c; transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0,0,0,.45); }
@@ -100,28 +120,19 @@ h1:hover { animation: sheen 1.6s cubic-bezier(.3,.6,.2,1) 0s 1 both; }
 .btn.primary small { color: #2c2f37; }
 .btn.primary:hover { box-shadow: inset 0 1px 0 #fff, 0 12px 34px rgba(233,236,241,.18); }
 
-/* ---------- the video still ---------- */
-.still { position: relative; width: 100%; max-width: 100%; aspect-ratio: 4 / 5; border-radius: 10px; overflow: hidden; background: #050506; border: 1px solid var(--gunmetal); box-shadow: 0 30px 80px rgba(0,0,0,.6); }
-.still canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.lb { position: absolute; inset-inline: 0; height: 9%; background: #000; display: flex; align-items: center; gap: 10px; padding-inline: 14px; z-index: 2; font-family: var(--mono); font-size: clamp(9px, 1.15vw, 12px); color: var(--steel); }
-.lb.top { top: 0; justify-content: space-between; }
-.lb.bottom { bottom: 0; justify-content: center; }
-.prompt { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.prompt::before { content: "prompt ›"; color: var(--sith); margin-right: 8px; }
-.caret { display: inline-block; width: .55em; height: 1.05em; vertical-align: -.15em; background: var(--chrome); margin-left: 3px; animation: blink 1.1s steps(1) infinite; }
-@keyframes blink { 50% { opacity: 0; } }
-.rec { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--chrome); }
-.rec i { width: 7px; height: 7px; border-radius: 50%; background: var(--blood); }
-.caption { font-family: var(--body); font-stretch: 85%; font-weight: 600; font-size: clamp(11px, 1.5vw, 15px); color: #fff; background: rgba(0,0,0,.55); padding: 2px 10px; letter-spacing: .02em; }
-.tat { position: absolute; z-index: 1; font-family: var(--ink); color: rgba(206,211,224,.42); line-height: 1; white-space: nowrap; pointer-events: none; transform: translate(-50%, -50%) rotate(var(--r, 0deg)); font-size: var(--s, 2rem); }
-.tag-ai { position: absolute; z-index: 2; right: 12px; top: 11%; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; color: var(--steel); border: 1px solid #33363f; padding: 3px 6px; border-radius: 3px; background: rgba(0,0,0,.4); }
-
-/* ---------- grill divider ---------- */
-.grill { display: flex; justify-content: center; gap: 4px; padding-block: 8px 40px; }
-.grill i { width: clamp(22px, 4vw, 40px); aspect-ratio: 5 / 7; max-width: 100%; border-radius: 6px 6px 12px 12px; background: var(--chrome-grad); box-shadow: inset 0 -3px 0 rgba(0,0,0,.35), inset 0 2px 0 #fff, 0 6px 16px rgba(0,0,0,.6); }
-.grill i:nth-child(n+3):nth-child(-n+6) { transform: translateY(3px); }
-.grill i:nth-child(4) { position: relative; }
-.grill i:nth-child(4)::after { content: ""; position: absolute; left: 50%; top: 38%; width: 34%; aspect-ratio: 1; transform: translate(-50%, -50%) rotate(45deg); background: #fff; box-shadow: 0 0 12px #fff; border-radius: 1px; }
+/* wide: the copy sits over the left of the scene */
+@media (min-width: 960px) {
+  .stage { min-height: clamp(640px, 88vh, 900px); display: flex; align-items: center; }
+  .viewport { position: absolute; inset: 0; }
+  .viewport::after { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+    background: linear-gradient(90deg, rgba(5,5,7,.9) 0%, rgba(5,5,7,.6) 34%, rgba(5,5,7,0) 54%); }
+  .copy { position: relative; z-index: 2; width: min(600px, 46%); margin-left: var(--edge); padding-block: 96px 88px; }
+}
+/* narrow: the scene first, the copy under it */
+@media (max-width: 959.98px) {
+  .viewport { aspect-ratio: 4 / 5; max-height: 78vh; }
+  .copy { padding: 28px var(--gutter) 0; }
+}
 
 /* ---------- details ---------- */
 .details { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: clamp(16px, 3vw, 28px); }
@@ -129,7 +140,7 @@ h1:hover { animation: sheen 1.6s cubic-bezier(.3,.6,.2,1) 0s 1 both; }
 .panel h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: clamp(2rem, 4vw, 2.8rem); line-height: 1; text-wrap: balance;
   background: var(--chrome-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .panel p { margin: 0; color: #c9cdd5; max-width: 36em; }
-.label { font-family: var(--body); font-stretch: 75%; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; font-size: 12px; color: var(--steel); }
+.label { font-stretch: 75%; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; font-size: 12px; color: var(--steel); }
 .ca { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
 .ca code { flex: 1 1 18rem; min-width: 0; font-family: var(--mono); font-size: 14px; padding: 12px 14px; border-radius: 6px; background: #0b0b10; border: 1px solid var(--gunmetal); overflow-wrap: anywhere; user-select: all; color: var(--chrome); }
 .copy-btn { flex: none; font: inherit; font-stretch: 80%; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; font-size: 13px; padding: 0 18px; min-height: 44px; border-radius: 6px; cursor: pointer; color: #0b0b0f; background: var(--silver-btn); border: 1px solid #fff; }
@@ -144,24 +155,23 @@ h1:hover { animation: sheen 1.6s cubic-bezier(.3,.6,.2,1) 0s 1 both; }
 
 /* ---------- fine print ---------- */
 .fine { margin-top: clamp(32px, 5vw, 56px); padding-top: 24px; border-top: 1px solid var(--gunmetal); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 20px 40px; }
-.fine h3 { margin: 0; font-family: var(--body); font-stretch: 75%; font-weight: 800; text-transform: uppercase; letter-spacing: .14em; font-size: 13px; color: var(--chrome); }
+.fine h3 { margin: 0; font-stretch: 75%; font-weight: 800; text-transform: uppercase; letter-spacing: .14em; font-size: 13px; color: var(--chrome); }
 .fine ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; font-size: 14px; color: var(--steel); max-width: 62em; }
 .fine li { padding-left: 18px; position: relative; }
 .fine li::before { content: ""; position: absolute; left: 0; top: .62em; width: 8px; height: 1px; background: #5b616c; }
 .sign { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; color: #5f6570; }
 
-@media (max-width: 900px) {
-  .hero, .details, .fine { grid-template-columns: minmax(0, 1fr); }
-  .still { max-width: 560px; justify-self: center; }
-}
+@media (max-width: 900px) { .details, .fine { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 520px) {
   .links, .facts { grid-template-columns: minmax(0, 1fr); }
   .lede { font-size: 16px; }
   .bar .cto span { display: none; }
+  .lb { font-size: 10px; height: 38px; }
+  .tag-ai { top: 50px; }
 }
 @media (prefers-reduced-motion: reduce) {
   h1, h1:hover { animation: none; background-position: -60% 0, 0 0; }
-  .caret { animation: none; }
+  .caret, .rec i { animation: none; }
   .btn { transition: none; }
 }
 </style>
@@ -172,9 +182,20 @@ h1:hover { animation: sheen 1.6s cubic-bezier(.3,.6,.2,1) 0s 1 both; }
     <a class="mark" href="#top" aria-label="Lil Vader, top of page"><b>LV</b> $LILVADER</a>
     <span class="cto"><i aria-hidden="true"></i><span>Community takeover · </span>Solana</span>
   </header>
+</div>
 
-  <main id="top">
-    <section class="hero">
+<main id="top">
+    <section class="stage">
+      <div class="viewport" id="viewport" role="img" aria-label="A 3D music-video scene in the dark: two glowing yellow eyes, a silver grill with a diamond, face tattoos, and a heavy silver Cuban link chain that sparkles.">
+        <canvas id="gl" aria-hidden="true"></canvas>
+        <div class="lb top" aria-hidden="true">
+          <span class="prompt">lil vader, rap video, silver grill, iced cuban link, face tattoos, glowing eyes, 4k<span class="caret"></span></span>
+          <span class="rec"><i></i>00:06:06</span>
+        </div>
+        <span class="tag-ai" aria-hidden="true">AI-GENERATED</span>
+        <div class="lb bottom" aria-hidden="true"><span class="caption">♪ Mace fell out of a Windu ♪</span></div>
+      </div>
+
       <div class="copy">
         <div class="eyebrow">An homage to <em>Ai Ruins Everything</em></div>
         <h1>Lil Vader</h1>
@@ -199,24 +220,9 @@ h1:hover { animation: sheen 1.6s cubic-bezier(.3,.6,.2,1) 0s 1 both; }
           </a>
         </nav>
       </div>
-
-      <figure class="still" role="img" aria-label="A dark music-video still: two glowing yellow eyes, a silver grill, face tattoos and an iced-out Cuban link chain.">
-        <canvas id="still" aria-hidden="true"></canvas>
-        <div class="lb top" aria-hidden="true">
-          <span class="prompt">lil vader, rap video, silver grill, iced cuban link, face tattoos, glowing eyes, 4k<span class="caret"></span></span>
-          <span class="rec"><i></i>00:06:06</span>
-        </div>
-        <span class="tag-ai" aria-hidden="true">AI-GENERATED</span>
-        <span class="tat" style="left:50%; top:24%; --s:clamp(1.6rem,4.4vw,2.6rem); --r:-3deg" aria-hidden="true">Lil Vader</span>
-        <span class="tat" style="left:31%; top:44%; --s:clamp(.9rem,2.2vw,1.35rem); --r:-12deg" aria-hidden="true">Sith Lord</span>
-        <span class="tat" style="left:69%; top:45%; --s:clamp(1rem,2.4vw,1.5rem); --r:8deg" aria-hidden="true">66</span>
-        <span class="tat" style="left:52%; top:73%; --s:clamp(1.5rem,4vw,2.4rem); --r:-6deg" aria-hidden="true">I Hate Sand</span>
-        <div class="lb bottom" aria-hidden="true"><span class="caption">♪ Mace fell out of a Windu ♪</span></div>
-      </figure>
     </section>
 
-    <div class="grill" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-
+  <div class="wrap">
     <section class="details">
       <div class="panel">
         <span class="label">Contract address</span>
@@ -243,8 +249,10 @@ h1:hover { animation: sheen 1.6s cubic-bezier(.3,.6,.2,1) 0s 1 both; }
         </a>
       </div>
     </section>
-  </main>
+  </div>
+</main>
 
+<div class="wrap">
   <footer class="fine">
     <h3>Fine print</h3>
     <ul>
@@ -258,147 +266,315 @@ h1:hover { animation: sheen 1.6s cubic-bezier(.3,.6,.2,1) 0s 1 both; }
 </div>
 
 <script>
+// Copy the contract address; fall back to selecting it where the clipboard is refused.
 (() => {
-  // Copy the contract address; fall back to selecting it where the clipboard is refused.
   const btn = document.getElementById("copy"), code = document.getElementById("ca");
   btn.addEventListener("click", () => {
     const done = () => { btn.textContent = "Copied"; btn.dataset.done = ""; setTimeout(() => { btn.textContent = "Copy"; delete btn.dataset.done; }, 1800); };
     const select = () => { const r = document.createRange(); r.selectNodeContents(code); const s = getSelection(); s.removeAllRanges(); s.addRange(r); btn.textContent = "Selected"; setTimeout(() => (btn.textContent = "Copy"), 1800); };
     try { navigator.clipboard.writeText(code.textContent.trim()).then(done, select); } catch { select(); }
   });
-
-  // The still: haze, two eyes, a grill and a Cuban link chain, drawn to the frame's size.
-  const cv = document.getElementById("still"), ctx = cv.getContext("2d");
-  const still = cv.parentElement;
-  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  let W = 0, H = 0, dpr = 1;
-  const glints = Array.from({ length: 7 }, (_, i) => ({ u: (i + 0.5) / 7 + (Math.random() - 0.5) * 0.08, phase: Math.random() * 6.28, speed: 0.6 + Math.random() * 0.8 }));
-
-  function size() {
-    const r = still.getBoundingClientRect();
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    W = r.width; H = r.height;
-    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-
-  function haze() {
-    ctx.fillStyle = "#050506"; ctx.fillRect(0, 0, W, H);
-    let g = ctx.createRadialGradient(W * .5, H * .38, 0, W * .5, H * .38, W * .75);
-    g.addColorStop(0, "rgba(118,72,30,.40)"); g.addColorStop(.45, "rgba(52,34,22,.22)"); g.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    g = ctx.createRadialGradient(W * .5, H * .5, W * .1, W * .5, H * .5, W * .42);
-    g.addColorStop(0, "rgba(0,0,0,.55)"); g.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  }
-
-  function eyes(t) {
-    const breathe = calm ? 1 : .88 + .12 * Math.sin(t * 1.3);
-    for (const x of [.385, .615]) {
-      const cx = W * x, cy = H * .375, rw = W * .052, rh = H * .014;
-      let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * .13);
-      g.addColorStop(0, `rgba(255,182,39,${.42 * breathe})`); g.addColorStop(1, "rgba(255,182,39,0)");
-      ctx.fillStyle = g; ctx.fillRect(cx - W * .14, cy - W * .14, W * .28, W * .28);
-      ctx.beginPath();
-      ctx.moveTo(cx - rw, cy);
-      ctx.quadraticCurveTo(cx, cy - rh * 2.1, cx + rw, cy);
-      ctx.quadraticCurveTo(cx, cy + rh * 1.5, cx - rw, cy);
-      g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rw);
-      g.addColorStop(0, "#fff7d6"); g.addColorStop(.35, "#ffc94a"); g.addColorStop(1, "#c46d00");
-      ctx.fillStyle = g; ctx.globalAlpha = breathe; ctx.fill(); ctx.globalAlpha = 1;
-      ctx.beginPath(); ctx.ellipse(cx, cy - rh * .1, rh * .55, rh * 1.05, 0, 0, Math.PI * 2); ctx.fillStyle = "#1a0d00"; ctx.fill();
-    }
-  }
-
-  function chromeV(y0, y1) {
-    const g = ctx.createLinearGradient(0, y0, 0, y1);
-    g.addColorStop(0, "#ffffff"); g.addColorStop(.3, "#d9dde4"); g.addColorStop(.55, "#7d838e"); g.addColorStop(.75, "#e8ebf0"); g.addColorStop(1, "#8e949f");
-    return g;
-  }
-
-  function grill() {
-    const n = 8, cx = W * .5, cy = H * .565, tw = W * .045, th = H * .056;
-    ctx.beginPath(); ctx.ellipse(cx, cy + th * .12, tw * n * .56, th * .95, 0, 0, Math.PI * 2); ctx.fillStyle = "#0d0807"; ctx.fill();
-    for (let i = 0; i < n; i++) {
-      const k = i - (n - 1) / 2, x = cx + k * tw, lift = Math.pow(k / (n / 2), 2) * th * .38, h = th * (1 - Math.abs(k) * .045);
-      const y = cy - th / 2 - lift + (th - h) / 2, w = tw * .9, r = w * .28;
-      ctx.beginPath();
-      ctx.moveTo(x - w / 2 + r, y); ctx.lineTo(x + w / 2 - r, y); ctx.quadraticCurveTo(x + w / 2, y, x + w / 2, y + r);
-      ctx.lineTo(x + w / 2, y + h - r * 1.6); ctx.quadraticCurveTo(x + w / 2, y + h, x + w / 2 - r * 1.6, y + h);
-      ctx.lineTo(x - w / 2 + r * 1.6, y + h); ctx.quadraticCurveTo(x - w / 2, y + h, x - w / 2, y + h - r * 1.6);
-      ctx.lineTo(x - w / 2, y + r); ctx.quadraticCurveTo(x - w / 2, y, x - w / 2 + r, y);
-      ctx.fillStyle = chromeV(y, y + h); ctx.fill();
-      ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 1; ctx.stroke();
-      ctx.beginPath(); ctx.ellipse(x - w * .08, y + h * .2, w * .3, h * .07, -.15, 0, Math.PI * 2); ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.fill();
-    }
-  }
-
-  // Points along the chain's hang, spaced by arc length.
-  function chainPath(t) {
-    const sway = calm ? 0 : Math.sin(t * .7) * .012;
-    const x0 = W * .2, x1 = W * .8, y0 = H * .655, sag = H * (.215 + sway), shift = calm ? 0 : Math.sin(t * .5) * W * .006;
-    const pts = [];
-    for (let i = 0; i <= 200; i++) {
-      const u = i / 200, x = x0 + (x1 - x0) * u + shift * Math.sin(Math.PI * u);
-      pts.push([x, y0 + sag * (1 - Math.pow(2 * u - 1, 2))]);
-    }
-    const len = [0];
-    for (let i = 1; i < pts.length; i++) len.push(len[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
-    return { pts, len, total: len[len.length - 1] };
-  }
-  function at(path, s) {
-    const { pts, len } = path;
-    let i = 1; while (i < len.length - 1 && len[i] < s) i++;
-    const f = (s - len[i - 1]) / (len[i] - len[i - 1] || 1);
-    const x = pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, y = pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f;
-    return { x, y, a: Math.atan2(pts[i][1] - pts[i - 1][1], pts[i][0] - pts[i - 1][0]) };
-  }
-  function link(x, y, a, L, Wd, flat) {
-    const t = Wd * .34, ra = L * .7, rb = flat ? Wd * .48 : Wd * .32;
-    ctx.save(); ctx.translate(x, y); ctx.rotate(a);
-    ctx.beginPath(); ctx.ellipse(1.2, 2.2, ra, rb, 0, 0, Math.PI * 2); ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = t; ctx.stroke();
-    const g = ctx.createLinearGradient(0, -rb - t, 0, rb + t);
-    g.addColorStop(0, "#ffffff"); g.addColorStop(.32, flat ? "#b9bec8" : "#8d939e"); g.addColorStop(.5, "#353943"); g.addColorStop(.68, "#d4d8df"); g.addColorStop(1, "#6b717c");
-    ctx.beginPath(); ctx.ellipse(0, 0, ra, rb, 0, 0, Math.PI * 2); ctx.strokeStyle = g; ctx.lineWidth = t; ctx.stroke();
-    ctx.beginPath(); ctx.ellipse(0, 0, ra, rb, 0, Math.PI * 1.08, Math.PI * 1.62); ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.lineWidth = t * .28; ctx.stroke();
-    ctx.restore();
-  }
-  function star(x, y, r, alpha) {
-    if (alpha <= 0.02) return;
-    ctx.save(); ctx.globalAlpha = alpha;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 1.4);
-    g.addColorStop(0, "rgba(255,255,255,.9)"); g.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r * 1.4, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = Math.max(1, r * .08); ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(x - r * 2, y); ctx.lineTo(x + r * 2, y); ctx.moveTo(x, y - r * 2); ctx.lineTo(x, y + r * 2); ctx.stroke();
-    ctx.restore();
-  }
-
-  function chain(t) {
-    const path = chainPath(t), Wd = Math.max(9, W * .042), L = Wd * .74;
-    const n = Math.floor(path.total / L);
-    const ls = [];
-    for (let i = 0; i <= n; i++) ls.push(at(path, i * L + (path.total - n * L) / 2));
-    for (let pass = 0; pass < 2; pass++) ls.forEach((p, i) => { if (i % 2 === pass) link(p.x, p.y, p.a, L, Wd, pass === 1); });
-    for (const gl of glints) {
-      const p = at(path, gl.u * path.total);
-      const a = calm ? .8 : Math.max(0, Math.sin(t * gl.speed + gl.phase)) ** 6;
-      star(p.x, p.y - Wd * .2, Wd * .32, a);
-    }
-    // one stone in the grill catches the light too
-    star(W * .5 + W * .021, H * .565 - H * .012, Wd * .28, calm ? .9 : Math.max(0, Math.sin(t * .9 + 1)) ** 8);
-  }
-
-  function frame(ms) {
-    const t = ms / 1000;
-    haze(); eyes(t); grill(); chain(t);
-    if (!calm && !document.hidden) requestAnimationFrame(frame);
-  }
-  const ro = new ResizeObserver(() => { size(); if (calm) frame(0); });
-  ro.observe(still);
-  size(); frame(performance.now());
-  if (!calm) document.addEventListener("visibilitychange", () => { if (!document.hidden) requestAnimationFrame(frame); });
 })();
+</script>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+
+const vp = document.getElementById("viewport");
+const canvas = document.getElementById("gl");
+const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
+} catch {
+  canvas.remove(); // no WebGL: the viewport keeps its painted haze
+  throw new Error("WebGL unavailable");
+}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.95;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050507);
+scene.fog = new THREE.FogExp2(0x060608, 0.04);
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+
+// Reflections: a dark studio with softbox strips, so the chrome reads as chrome rather than as a mirror of a white room.
+{
+  const env = new THREE.Scene();
+  env.background = new THREE.Color(0x020203);
+  const panel = (w, h, hex, k, pos, rot) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(hex).multiplyScalar(k), side: THREE.DoubleSide }));
+    m.position.set(...pos); m.rotation.set(...rot); env.add(m);
+  };
+  panel(12, 1.2, 0xffffff, 4.5, [0, 6, 0], [Math.PI / 2, 0, 0]);
+  panel(1.1, 9, 0xffffff, 2.2, [-7, 0, 2], [0, Math.PI / 2, 0]);
+  panel(1.1, 9, 0xdde6ff, 1.6, [7, 1, -1], [0, -Math.PI / 2, 0]);
+  panel(6, 2, 0xffad40, 0.7, [0, -0.5, 8], [0, Math.PI, 0]);
+  panel(5, 0.8, 0xff2236, 1.6, [0, -5, -3], [-Math.PI / 2.4, 0, 0]);
+  const pm = new THREE.PMREMGenerator(renderer);
+  scene.environment = pm.fromScene(env, 0.03).texture;
+  pm.dispose();
+}
+
+const chrome = new THREE.MeshPhysicalMaterial({ color: 0xf1f3f7, metalness: 1, roughness: 0.13, clearcoat: 0.6, clearcoatRoughness: 0.08, envMapIntensity: 1.0 });
+const toothChrome = chrome.clone(); toothChrome.roughness = 0.08; toothChrome.clearcoat = 0.2;
+
+const rig = new THREE.Group();
+scene.add(rig);
+
+// ---------- the chain: twisted, flattened links along the line of a necklace ----------
+const LINKS = 64, SPACING = 0.215;
+const chain = new THREE.InstancedMesh(new THREE.TorusGeometry(0.2, 0.074, 16, 40), chrome, LINKS);
+chain.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+const chainHolder = new THREE.Group();
+chainHolder.add(chain);
+rig.add(chainHolder);
+const HANG = [[-1.95, 2.05, -1.6], [-1.9, 0.72, -0.5], [-1.35, -0.5, 0.42], [0, -1.0, 0.82], [1.35, -0.5, 0.42], [1.9, 0.72, -0.5], [1.95, 2.05, -1.6]];
+const linkPos = [];
+const M = new THREE.Matrix4(), R = new THREE.Matrix4(), S = new THREE.Matrix4().makeScale(1.32, 1, 0.6);
+const X = new THREE.Vector3(), Y = new THREE.Vector3(), Z = new THREE.Vector3(), F = new THREE.Vector3(0, 0, 1);
+const twist = [new THREE.Matrix4().makeRotationX(0.95), new THREE.Matrix4().makeRotationX(-0.95)];
+function layoutChain(t) {
+  const sway = calm ? 0 : Math.sin(t * 0.8) * 0.07;
+  const pts = HANG.map(([x, y, z], i) => {
+    const w = Math.sin((Math.PI * i) / (HANG.length - 1));
+    return new THREE.Vector3(x + sway * w * 0.5, y, z + sway * w);
+  });
+  const curve = new THREE.CatmullRomCurve3(pts, false, "catmullrom", 0.5);
+  const n = Math.min(LINKS, Math.floor(curve.getLength() / SPACING));
+  for (let i = 0; i < n; i++) {
+    const u = (i + 0.5) / n, p = curve.getPointAt(u);
+    X.copy(curve.getTangentAt(u));
+    Z.copy(F).addScaledVector(X, -X.dot(F)).normalize();
+    Y.crossVectors(Z, X);
+    M.makeBasis(X, Y, Z).multiply(twist[i % 2]).multiply(S).setPosition(p);
+    chain.setMatrixAt(i, M);
+    (linkPos[i] ||= new THREE.Vector3()).copy(p);
+  }
+  chain.count = n;
+  chain.instanceMatrix.needsUpdate = true;
+  linkPos.length = n;
+}
+
+// ---------- the grill: eight chrome teeth on a smile, one stone ----------
+const grill = new THREE.Group();
+grill.position.set(0, 0.3, 0.95);
+rig.add(grill);
+const toothGeo = new RoundedBoxGeometry(0.168, 0.19, 0.12, 4, 0.05);
+for (let i = 0; i < 8; i++) {
+  const k = i - 3.5, a = k * 0.124, r = 1.4;
+  const tooth = new THREE.Mesh(toothGeo, toothChrome);
+  tooth.position.set(Math.sin(a) * r, Math.abs(k) ** 2 * 0.007 - (Math.abs(k) < 1 ? 0.012 : 0), Math.cos(a) * r - r);
+  tooth.rotation.y = a;
+  if (Math.abs(k) > 2.5) tooth.scale.set(0.95, 0.9, 1);
+  grill.add(tooth);
+}
+const stone = new THREE.Mesh(new THREE.OctahedronGeometry(0.038), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 2.2, metalness: 0, roughness: 0 }));
+stone.position.set(0.075, 0.035, 0.07);
+grill.add(stone);
+
+// ---------- the eyes: slanted, Sith-yellow, they blink and follow the cursor ----------
+const eyeMat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false });
+const EYE = new THREE.Color(0xffb627).multiplyScalar(2.4);
+const pupilMat = new THREE.MeshBasicMaterial({ color: 0x0a0400 });
+const ball = new THREE.SphereGeometry(0.5, 32, 16);
+const eyes = [-1, 1].map((side) => {
+  const g = new THREE.Group();
+  g.position.set(side * 0.58, 1.17, 0.78);
+  g.rotation.z = side * -0.16;
+  const iris = new THREE.Mesh(ball, eyeMat); iris.scale.set(0.36, 0.105, 0.08);
+  const pupil = new THREE.Mesh(ball, pupilMat); pupil.scale.set(0.032, 0.085, 0.02); pupil.position.z = 0.03;
+  g.add(iris, pupil);
+  rig.add(g);
+  return { g, pupil };
+});
+const eyeLight = new THREE.PointLight(0xffa020, 0, 3.2, 2);
+eyeLight.position.set(0, 1.35, 1.2);
+rig.add(eyeLight);
+
+// ---------- face tattoos: script ink floating at the depth of a face ----------
+const tattoos = [];
+function addTattoo(text, width, pos, rotZ, opacity) {
+  const fs = 150, c = document.createElement("canvas"), g = c.getContext("2d");
+  g.font = `${fs}px "Mrs Saint Delafield", cursive`;
+  c.width = Math.ceil(g.measureText(text).width + 90); c.height = Math.ceil(fs * 1.45);
+  g.font = `${fs}px "Mrs Saint Delafield", cursive`;
+  g.fillStyle = "#d6dbe7"; g.textBaseline = "middle";
+  g.fillText(text, 45, c.height * 0.56);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, (width * c.height) / c.width), mat);
+  mesh.position.set(...pos); mesh.rotation.z = rotZ;
+  rig.add(mesh);
+  tattoos.push({ mat, opacity });
+}
+const inked = (async () => {
+  try { await Promise.race([document.fonts.load('150px "Mrs Saint Delafield"'), new Promise((r) => setTimeout(r, 2500))]); } catch {}
+  addTattoo("Lil Vader", 1.55, [0, 1.78, 0.55], -0.03, 0.62);
+  addTattoo("Sith Lord", 0.62, [-0.74, 0.86, 0.74], 0.14, 0.5);
+  addTattoo("66", 0.2, [0.78, 0.88, 0.74], -0.1, 0.55);
+  addTattoo("I Hate Sand", 1.3, [0.02, -0.32, 0.72], 0.05, 0.55);
+})();
+
+// ---------- atmosphere: warm haze behind, dust in the light, glints on the ice ----------
+function softTexture(stops) {
+  const c = document.createElement("canvas"); c.width = c.height = 256;
+  const g = c.getContext("2d"), grd = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  stops.forEach(([o, col]) => grd.addColorStop(o, col));
+  g.fillStyle = grd; g.fillRect(0, 0, 256, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const haze = [
+  [softTexture([[0, "rgba(150,92,38,.32)"], [0.5, "rgba(80,48,22,.12)"], [1, "rgba(0,0,0,0)"]]), [0.2, 0.6, -4], 13],
+  [softTexture([[0, "rgba(60,72,110,.24)"], [1, "rgba(0,0,0,0)"]]), [-3.2, -1.2, -6], 12],
+  [softTexture([[0, "rgba(170,20,40,.2)"], [1, "rgba(0,0,0,0)"]]), [3.4, -2.6, -5], 9],
+].map(([map, pos, size]) => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+  m.position.set(...pos); rig.add(m); return m;
+});
+
+const DUST = 420;
+const dustPos = new Float32Array(DUST * 3);
+for (let i = 0; i < DUST; i++) { dustPos[i * 3] = (Math.random() - 0.5) * 12; dustPos[i * 3 + 1] = (Math.random() - 0.5) * 8; dustPos[i * 3 + 2] = (Math.random() - 0.5) * 6 - 1; }
+const dustGeo = new THREE.BufferGeometry();
+dustGeo.setAttribute("position", new THREE.BufferAttribute(dustPos, 3));
+const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ size: 0.035, map: softTexture([[0, "rgba(255,230,190,1)"], [1, "rgba(0,0,0,0)"]]), color: 0xffe2b8, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }));
+rig.add(dust);
+
+const starTex = (() => {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const g = c.getContext("2d"), grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grd.addColorStop(0, "rgba(255,255,255,1)"); grd.addColorStop(0.12, "rgba(255,255,255,.7)"); grd.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = "rgba(255,255,255,.95)"; g.lineWidth = 2.2; g.beginPath();
+  g.moveTo(64, 2); g.lineTo(64, 126); g.moveTo(2, 64); g.lineTo(126, 64); g.stroke();
+  return new THREE.CanvasTexture(c);
+})();
+const glints = Array.from({ length: 16 }, (_, i) => {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: starTex, color: new THREE.Color(2.2, 2.2, 2.4), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+  rig.add(s);
+  return { s, at: (i * 0.618) % 1, phase: Math.random() * 6.28, speed: 0.7 + Math.random() * 0.9 };
+});
+const stoneGlint = new THREE.Sprite(glints[0].s.material);
+grill.add(stoneGlint); stoneGlint.position.copy(stone.position).add(new THREE.Vector3(0, 0, 0.02));
+
+// ---------- lights ----------
+const key = new THREE.SpotLight(0xffd7a0, 14, 20, 0.5, 0.6, 1.6); key.position.set(-3, 6, 5); rig.add(key); rig.add(key.target);
+const rim = new THREE.PointLight(0x9fb6ff, 7, 12, 2); rim.position.set(3.5, 2, -3); rig.add(rim);
+const red = new THREE.PointLight(0xff1e3c, 5, 9, 2); red.position.set(-2.5, -2.4, 1.5); rig.add(red);
+
+// ---------- post: bloom, then film (vignette, grain, a little colour fringing) ----------
+const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+const composer = new EffectComposer(renderer, target);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.5, 0.4, 0.9);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+const film = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 } },
+  vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uTime; varying vec2 vUv;
+    float rand(vec2 c){ return fract(sin(dot(c, vec2(12.9898, 78.233))) * 43758.5453); }
+    void main(){
+      vec2 d = vUv - 0.5; vec2 off = d * 0.0035;
+      vec3 col = vec3(texture2D(tDiffuse, vUv + off).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv - off).b);
+      col *= mix(1.0, smoothstep(0.75, 0.1, dot(d, d) * 1.7), 0.8);
+      col += (rand(vUv * 900.0 + uTime) - 0.5) * 0.045;
+      gl_FragColor = vec4(col, 1.0);
+    }`,
+});
+composer.addPass(film);
+
+// ---------- layout, pointer, scroll ----------
+let baseZ = 9.6, wide = true;
+function resize() {
+  const w = vp.clientWidth, h = vp.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  composer.setSize(w, h);
+  bloom.setSize(w, h);
+  camera.aspect = w / h;
+  wide = matchMedia("(min-width: 960px)").matches;
+  rig.position.x = wide ? Math.min(3.0, Math.max(1.3, (camera.aspect - 1) * 2.6)) : 0;
+  rig.position.y = wide ? 0.05 : -0.2;
+  rig.scale.setScalar(wide ? 0.92 : 1);
+  baseZ = wide ? 9.6 : 9.0 / Math.min(1, camera.aspect);
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(vp);
+resize();
+
+const pointer = { x: 0, y: 0 }, look = { x: 0, y: 0 };
+addEventListener("pointermove", (e) => { pointer.x = (e.clientX / innerWidth) * 2 - 1; pointer.y = -((e.clientY / innerHeight) * 2 - 1); }, { passive: true });
+
+// ---------- the loop ----------
+let visible = true, raf = 0, start = performance.now(), nextBlink = 3;
+new IntersectionObserver(([e]) => { visible = e.isIntersecting; if (visible) kick(); }).observe(vp);
+document.addEventListener("visibilitychange", kick);
+function kick() { if (!raf && visible && !document.hidden && !calm) raf = requestAnimationFrame(frame); }
+
+const ease = (x) => 1 - Math.pow(1 - Math.min(Math.max(x, 0), 1), 3);
+function frame(now) {
+  raf = 0;
+  const t = calm ? 10 : (now - start) / 1000;
+  // the chain drops onto the neck and settles
+  chainHolder.position.y = calm ? 0 : 3.4 * Math.exp(-3.1 * t) * Math.cos(6.5 * t);
+  layoutChain(t);
+  // the eyes power on with a flicker, then blink now and then
+  const on = calm ? 1 : ease((t - 0.7) / 0.5) * (t < 1.3 && Math.sin(t * 90) > 0.2 ? 0.35 : 1);
+  if (!calm && t > nextBlink + 0.16) nextBlink = t + 2.8 + Math.random() * 4;
+  const blink = !calm && t >= nextBlink ? 0.12 : 1;
+  eyeMat.color.copy(EYE).multiplyScalar(on);
+  eyeLight.intensity = 2.2 * on;
+  look.x += (pointer.x - look.x) * 0.06; look.y += (pointer.y - look.y) * 0.06;
+  for (const { g, pupil } of eyes) { g.scale.y = blink; pupil.position.x = look.x * 0.07; pupil.position.y = look.y * 0.012; }
+  // ink fades in after the eyes
+  const ink = calm ? 1 : ease((t - 1.3) / 1.2);
+  for (const tt of tattoos) tt.mat.opacity = tt.opacity * ink;
+  // glints ride the links
+  const n = linkPos.length;
+  glints.forEach((gl) => {
+    const p = linkPos[Math.floor(gl.at * n)] || linkPos[0];
+    if (!p) return;
+    gl.s.position.set(p.x, p.y + 0.06 + chainHolder.position.y, p.z + 0.14);
+    const a = calm ? 0.5 : Math.max(0, Math.sin(t * gl.speed + gl.phase)) ** 10;
+    gl.s.scale.setScalar(0.06 + 0.32 * a);
+  });
+  stoneGlint.scale.setScalar(calm ? 0.2 : 0.06 + 0.26 * Math.max(0, Math.sin(t * 1.1 + 1)) ** 8);
+  // atmosphere drifts
+  haze.forEach((m, i) => (m.rotation.z = t * 0.02 * (i % 2 ? -1 : 1)));
+  if (!calm) {
+    const a = dustGeo.attributes.position;
+    for (let i = 0; i < DUST; i++) { let y = a.getY(i) + 0.0018; if (y > 4) y = -4; a.setY(i, y); }
+    a.needsUpdate = true;
+  }
+  // camera: settles in on load, follows the cursor a little, leans in as the page scrolls
+  const r = vp.getBoundingClientRect();
+  const scroll = Math.min(Math.max(-r.top / Math.max(r.height, 1), 0), 1);
+  const intro = calm ? 0 : 1 - ease(t / 2.6);
+  camera.position.set(look.x * 0.5, 0.55 + look.y * 0.3, baseZ + intro * 2.2 - scroll * 1.4);
+  camera.lookAt(look.x * 0.15, 0.42 + rig.position.y, 0);
+  film.uniforms.uTime.value = t;
+  composer.render();
+  if (!calm) kick();
+}
+if (calm) inked.then(() => frame(performance.now())); else kick();
 </script>
 </body>
 </html>
