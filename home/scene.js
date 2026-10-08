@@ -1,122 +1,11 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="$LILVADER: a community takeover on Solana. Full site coming soon.">
-<meta property="og:title" content="$LILVADER">
-<meta property="og:description" content="$LILVADER: a community takeover on Solana. Full site coming soon.">
-<meta name="theme-color" content="#050507">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23050507'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='38' font-weight='700' text-anchor='middle' fill='%23e9ecf1'%3E%24%3C/text%3E%3C/svg%3E">
-<title>Lil Vader</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=Grenze+Gotisch:wght@800..900&display=swap">
-<style>
-/* Layout: one screen. A chrome Cuban link hangs from above the frame in a U; $LILVADER sits inside it, and the
-   "coming soon" line and three links sit under the chain. */
-:root {
-  --void: #050507;
-  --chrome: #e9ecf1;
-  --steel: #9097a3;
-  --gunmetal: #30333c;
-  --display: "Grenze Gotisch", "UnifrakturMaguntia", "Times New Roman", serif;
-  --body: "Archivo", "Helvetica Neue", Arial, sans-serif;
-  --chrome-grad: linear-gradient(180deg, #ffffff 0%, #eef0f4 20%, #a3a9b4 44%, #383c45 52%, #c7ccd4 61%, #ffffff 80%, #8a909b 100%);
-  --silver-btn: linear-gradient(180deg, #ffffff 0%, #eceef2 46%, #c9cdd5 54%, #e9ecf0 100%);
-  color-scheme: dark;
-}
-* { box-sizing: border-box; }
-html, body { height: 100%; }
-html { background: var(--void); }
-body {
-  margin: 0; overflow: hidden;
-  background: radial-gradient(60% 55% at 50% 42%, rgba(118, 72, 30, .32), transparent 70%), var(--void);
-  color: var(--chrome); font-family: var(--body); -webkit-font-smoothing: antialiased;
-}
-a { color: inherit; }
-:focus-visible { outline: 2px solid var(--chrome); outline-offset: 3px; border-radius: 6px; }
-
-#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-.stage { position: relative; z-index: 1; height: 100%; padding-inline: 16px; }
-
-h1 {
-  position: absolute; left: 50%; top: 41%; transform: translate(-50%, -50%);
-  margin: 0; white-space: nowrap; font-family: var(--display); font-weight: 900; line-height: 1;
-  font-size: clamp(2.9rem, 11.5vw, 8.5rem); letter-spacing: .01em;
-  background-image: linear-gradient(105deg, transparent 38%, rgba(255,255,255,.95) 48%, transparent 58%), var(--chrome-grad);
-  background-size: 260% 100%, 100% 100%; background-position: 160% 0, 0 0; background-repeat: no-repeat;
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(0 3px 0 #000) drop-shadow(0 0 30px rgba(233,236,241,.12));
-  animation: sheen 2.6s cubic-bezier(.3,.6,.2,1) 1.2s 1 both;
-  padding: .06em .08em;
-}
-h1:hover { animation: sheen 1.6s cubic-bezier(.3,.6,.2,1) 0s 1 both; }
-@keyframes sheen { from { background-position: 160% 0, 0 0; } to { background-position: -60% 0, 0 0; } }
-
-.under { position: absolute; left: 0; right: 0; top: 74%; display: grid; justify-items: center; gap: 20px; padding-inline: 16px; }
-.soon { margin: 0; font-stretch: 75%; font-weight: 700; text-transform: uppercase; letter-spacing: .32em; font-size: clamp(12px, 1.6vw, 15px); color: var(--steel); text-align: center; }
-.soon::before, .soon::after { content: ""; display: inline-block; width: 28px; height: 1px; background: #4a4e58; vertical-align: .3em; margin-inline: 14px; }
-.links { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
-.btn {
-  display: inline-flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 20px; border-radius: 999px; text-decoration: none;
-  font-stretch: 80%; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; font-size: 14px;
-  border: 1px solid var(--gunmetal); background: rgba(14,14,19,.72); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-  transition: border-color .2s, transform .2s, box-shadow .2s;
-}
-.btn:hover { border-color: #6a707b; transform: translateY(-1px); box-shadow: 0 10px 28px rgba(0,0,0,.5); }
-.btn svg { width: 18px; height: 18px; flex: none; }
-.btn.primary { background: var(--silver-btn); color: #0b0b0f; border-color: #fff; box-shadow: inset 0 1px 0 #fff, 0 10px 30px rgba(233,236,241,.1); }
-
-@media (max-width: 520px) {
-  h1 { top: 36%; font-size: clamp(2.3rem, 9.4vw, 3rem); }
-  .under { top: 70%; gap: 16px; }
-  .soon::before, .soon::after { width: 16px; margin-inline: 8px; }
-  .btn { padding: 0 16px; font-size: 13px; }
-}
-@media (max-height: 560px) { .under { top: 66%; } }
-@media (prefers-reduced-motion: reduce) {
-  h1, h1:hover { animation: none; background-position: -60% 0, 0 0; }
-  .btn { transition: none; }
-}
-</style>
-</head>
-<body>
-<canvas id="gl" aria-hidden="true"></canvas>
-<main class="stage">
-  <h1>$LILVADER</h1>
-  <div class="under">
-    <p class="soon">Full site coming soon</p>
-    <nav class="links" aria-label="$LILVADER links">
-      <a class="btn" href="https://x.com/lilvadercoin" target="_blank" rel="noopener">
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.7 3h3.1l-6.8 7.8L22 21h-6.3l-4.9-6.4L5.2 21H2.1l7.3-8.3L1.8 3h6.4l4.4 5.9L17.7 3zm-1.1 16.2h1.7L7.5 4.7H5.7l10.9 14.5z"/></svg>
-        X
-      </a>
-      <a class="btn" href="https://solscan.io/token/DBFcomeF97mTgRoKvHj2YtdFdvFcrLP4pFTBEPpKpump" target="_blank" rel="noopener">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
-        Solscan
-      </a>
-      <a class="btn primary" href="https://duster-roan.vercel.app" target="_blank" rel="noopener">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
-        Spacedust
-      </a>
-    </nav>
-  </div>
-</main>
-
-<script type="importmap">
-{ "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-} }
-</script>
-<script type="module">
+// The lilvader.space homepage scene: a chrome Cuban link hanging in a U around $LILVADER.
+// Bundled into public/home/scene.js by `npm run build:home` (the site's CSP allows scripts from its own origin only).
 import * as THREE from "three";
-import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
-import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
-import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 
 const canvas = document.getElementById("gl");
 const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -324,6 +213,3 @@ function frame(now) {
   if (!calm) kick();
 }
 if (!calm) kick();
-</script>
-</body>
-</html>

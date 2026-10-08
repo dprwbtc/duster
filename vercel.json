@@ -3,7 +3,14 @@
   "framework": null,
   "outputDirectory": "public",
   "rewrites": [
-    { "source": "/i/:mint", "destination": "/api/img?mint=:mint" }
+    {
+      "source": "/dust",
+      "destination": "/dust/index.html"
+    },
+    {
+      "source": "/i/:mint",
+      "destination": "/api/img?mint=:mint"
+    }
   ],
   "headers": [
     {

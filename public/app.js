@@ -1,4 +1,4 @@
-/* duster · sell your dust in one prompt
+/* spacedust · sell your dust in one prompt
    Vanilla JS, no build step. Token names, symbols and icons are attacker-controlled: every string from the
    network goes into the DOM as a text node or an attribute via h(), never as HTML. */
 
@@ -200,13 +200,13 @@ async function api(path, body, { signal } = {}) {
     res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal, cache: "no-store" } : { signal, cache: "no-store" });
   } catch (e) {
     if (e.name === "AbortError") throw e;
-    throw new ApiError("Couldn’t reach Duster. Check your connection and try again.", 0);
+    throw new ApiError("Couldn’t reach Spacedust. Check your connection and try again.", 0);
   }
   let j = null;
   try { j = await res.json(); } catch {}
   if (!res.ok || j === null) {
-    // a rate limit is Duster's problem, not the user's; the UI shows the exact wait next to it
-    const msg = res.status === 429 ? "Duster is busy right now. Try again when the timer runs out."
+    // a rate limit is Spacedust's problem, not the user's; the UI shows the exact wait next to it
+    const msg = res.status === 429 ? "Spacedust is busy right now. Try again when the timer runs out."
       : j?.error || (res.status === 504 ? "The server timed out. Try fewer tokens at once." : `Request failed (${res.status}).`);
     throw new ApiError(/[.!?]$/.test(msg) ? msg : msg + ".", res.status);
   }
@@ -264,7 +264,7 @@ let srT;
 function srSay(text) { const el = $("#srStatus"); clearTimeout(srT); el.textContent = ""; srT = setTimeout(() => { el.textContent = text; }, 60); }
 
 /* ================= mascot ================= */
-const POSE_DIMS = { 1: [204, 335], 2: [254, 334], 3: [254, 334], 4: [170, 330], 5: [311, 332], 6: [252, 326], 7: [267, 342], 8: [262, 321], 9: [257, 324], 10: [293, 318], 11: [317, 321], 12: [283, 321], 13: [226, 321], 14: [270, 328], 15: [272, 327], 16: [267, 328], 17: [199, 329], 18: [271, 329], 19: [231, 330] };
+const POSE_DIMS = { 1: [191, 326], 2: [246, 326], 3: [245, 325], 4: [160, 321], 5: [303, 325], 6: [242, 317], 7: [259, 334], 8: [252, 312], 9: [248, 314], 10: [285, 309], 11: [308, 314], 12: [274, 312], 13: [212, 312], 14: [262, 321], 15: [263, 318], 16: [259, 320], 17: [189, 319], 18: [261, 321], 19: [222, 322] };
 const pose = (n) => `/img/dusty/pose-${String(n).padStart(2, "0")}.webp`;
 function setPose(btn, n, { mode = "idle", hop = true } = {}) {
   if (!btn) return;
@@ -558,7 +558,7 @@ function openWallets({ note = null } = {}) {
     const mobile = matchMedia("(pointer: coarse)").matches;
     $("#wd-title").textContent = "no wallet found";
     fill(body,
-      h("p", { class: "facts" }, mobile ? "This browser doesn’t have a Solana wallet. Open Duster inside your wallet app’s browser instead:" : "This browser doesn’t have a Solana wallet extension. Install one, then reload this page."),
+      h("p", { class: "facts" }, mobile ? "This browser doesn’t have a Solana wallet. Open Spacedust inside your wallet app’s browser instead:" : "This browser doesn’t have a Solana wallet extension. Install one, then reload this page."),
       mobile && h("div", { class: "deep", style: "margin-top:14px" }, deepLinks().map((w) => h("a", { class: "w-opt", href: w.href, rel: "noreferrer" },
         h("span", { class: "w-ico", style: `background:${LETTER_BG[w.name][0]};color:${LETTER_BG[w.name][1]}` }, w.name[0]),
         h("span", {}, h("span", { class: "w-name" }, `open in ${w.name}`), h("span", { class: "w-sub" }, "opens this page in the wallet app")),
@@ -580,7 +580,7 @@ function openWallets({ note = null } = {}) {
           h("span", { class: "w-tag" }, icon("spark", "i i-sm"), "detected"));
       })),
       note,
-      h("p", { class: "wd-fine" }, "Works with Phantom, Solflare, Backpack and other Wallet Standard wallets. Connecting is read-only: Duster sees your address and balances. Nothing is signed until you approve it in your wallet."));
+      h("p", { class: "wd-fine" }, "Works with Phantom, Solflare, Backpack and other Wallet Standard wallets. Connecting is read-only: Spacedust sees your address and balances. Nothing is signed until you approve it in your wallet."));
   }
   if (!dlg.open) dlg.showModal();
 }
@@ -676,7 +676,7 @@ function disconnect({ quiet = false } = {}) {
   for (const el of rowEls.values()) el.remove(); rowEls.clear();
   root.classList.add("revisit");
   go("title", { back: true });
-  if (!quiet) toast({ title: "disconnected. come back dusty", body: "Duster no longer sees this wallet." });
+  if (!quiet) toast({ title: "disconnected. come back dusty", body: "Spacedust no longer sees this wallet." });
 }
 $("#heroConnect").addEventListener("click", () => (state.account ? go("pockets") : openWallets()));
 // "just reclaim rent": works without any sellable dust; asks for a wallet first when none is connected
@@ -1024,7 +1024,7 @@ $("#rangeApply").addEventListener("click", () => {
 /* ---- token icons and rows (keyed, patched in place so focus and scroll survive) ---- */
 // Token images only ever come from /api/img on this origin. The image a token's metadata points at is hosted
 // wherever its creator chose (often a per-wallet airdrop), so loading it from here would tell them this visitor
-// is on Duster right now; the server fetches it instead (SSRF-guarded), checks it's a real raster image and
+// is on Spacedust right now; the server fetches it instead (SSRF-guarded), checks it's a real raster image and
 // re-encodes it. The letter badge is the placeholder underneath and stays if there's no image. Names that look
 // like lures never get a picture either: a scam's logo is part of the lure. The URL is /i/<mint> (rewritten to
 // /api/img), so a list full of pictures never eats into the firewall's /api request budget. A failed image is
@@ -1164,7 +1164,7 @@ function renderPockets({ stagger = false } = {}) {
     $("#pk-title").textContent = "wallet’s spotless";
     const unpriced = state.rows.filter((r) => r.usd == null).length;
     $("#pkFacts").textContent = state.rows.length
-      ? `Nothing here has a reliable price${unpriced ? ` (${plural(unpriced, "token")} without one, listed below)` : ""}, so there’s nothing Duster can sell safely.`
+      ? `Nothing here has a reliable price${unpriced ? ` (${plural(unpriced, "token")} without one, listed below)` : ""}, so there’s nothing Spacedust can sell safely.`
       : "No tokens besides SOL, so there’s nothing to dust.";
     // the left-alone line sits below the card (under the bar on a phone), so the facts say it first
     const alone = (state.nftCount || 0) + (state.collectibleCount || 0);
@@ -1199,7 +1199,7 @@ function leftAloneLine(el, nfts, coll, unchecked) {
   if (el.hidden) return;
   const n = nfts + coll;
   fill(el, icon("info", "i i-sm"), h("span", {},
-    n ? `${leftAlonePhrase(nfts, coll)} in this wallet ${n === 1 ? "is" : "are"} left alone. Duster never sells or burns ${leftAloneThem(nfts, coll)}.` : "",
+    n ? `${leftAlonePhrase(nfts, coll)} in this wallet ${n === 1 ? "is" : "are"} left alone. Spacedust never sells or burns ${leftAloneThem(nfts, coll)}.` : "",
     unchecked ? [n ? " " : "", uncheckedText(unchecked), " ", h("button", { class: "btn-text sm", type: "button", onclick: () => loadHoldings() }, "check again")] : ""));
 }
 function renderPocketsMeta() {
@@ -1250,7 +1250,7 @@ function renderPocketsMeta() {
     fill(kept, tokIcon(burnRow),
       h("p", { class: "kept-txt" },
         h("b", {}, state.includeBurn ? `your ${burnSym()} is in the list` : `kept: your ${burnSym()} (${amt(burnRow.amount)} · ${usd(burnRow.usd)})`),
-        h("span", {}, state.includeBurn ? "It’s selectable now. Selling it while every swap buys and burns it mostly cancels out." : "Duster never picks the burn token for you. Selling it while every swap buys and burns it mostly cancels out.")),
+        h("span", {}, state.includeBurn ? "It’s selectable now. Selling it while every swap buys and burns it mostly cancels out." : "Spacedust never picks the burn token for you. Selling it while every swap buys and burns it mostly cancels out.")),
       h("button", { class: "btn-ghost sm", type: "button", disabled: !!state.busy, onclick: () => {
         state.includeBurn = !state.includeBurn;
         if (!state.includeBurn) state.selected.delete(burnRow.mint);
@@ -1625,7 +1625,7 @@ function lowSolFix(busy) {
 function humanSkip(s, p) {
   const r = String(s.reason || "");
   let m;
-  if (r === "rate limited") return { why: "Not quoted yet: Duster is busy right now. Nothing was built or signed.", fix: "retry" };
+  if (r === "rate limited") return { why: "Not quoted yet: Spacedust is busy right now. Nothing was built or signed.", fix: "retry" };
   if (r.startsWith("quote service busy")) return { why: "Jupiter’s quote service is busy right now. Try again in a moment.", fix: "retry" };
   if (r.startsWith("no route")) return { why: "No market for this token right now.", fix: "retry" };
   if ((m = r.match(/route returns \$([\d.]+) for \$([\d.]+)/))) {
@@ -1643,8 +1643,8 @@ function humanSkip(s, p) {
   if (r === "account frozen") return { why: "This token account is frozen by its issuer, so it can’t be moved." };
   if (r === "no reliable price") return { why: "No reliable price right now, so the swap can’t be checked against the market." };
   if (r === "not in wallet") return { why: "It’s no longer in this wallet." };
-  if (r === "NFTs aren't sold here") return { why: "It’s an NFT, and Duster never sells NFTs." };
-  if (r === "collectibles aren't sold here") return { why: "It’s a collectible with no market price, and Duster never sells those." };
+  if (r === "NFTs aren't sold here") return { why: "It’s an NFT, and Spacedust never sells NFTs." };
+  if (r === "collectibles aren't sold here") return { why: "It’s a collectible with no market price, and Spacedust never sells those." };
   if (r.startsWith("couldn't check whether it's an NFT")) return { why: "Couldn’t confirm it isn’t an NFT just now, so it was left out. Nothing was built or signed.", fix: "retry" };
   if (r.startsWith("preview failed: ")) return { why: `Not quoted. ${r.slice(16)}`, fix: "retry" };
   return { why: r.charAt(0).toUpperCase() + r.slice(1) + (/[.]$/.test(r) ? "" : ".") };
@@ -1744,7 +1744,7 @@ function drawCut() {
     ? (state.staleWhy === "settings" ? "These quotes used your old protection settings. Refresh to quote again with the new ones, then approve. Nothing was sent."
       : `The oldest of these quotes is more than ${TTL_MS / 1000} seconds old, so prices may have moved. Refresh to get fresh ones, then approve. Nothing was sent.`)
     : n ? `${plural(n, "token")} ready, one transaction each${p.feeApplied ? ", each with its own buy and burn" : ""}. Your wallet will ask once for all ${n}.${p.skipped.length ? ` Another ${p.skipped.length} ${p.skipped.length === 1 ? "was" : "were"} skipped (reasons below).` : ""}`
-    : rl ? "Duster is rate-limiting previews for a moment. Nothing was built or signed. Try again when the timer runs out."
+    : rl ? "Spacedust is rate-limiting previews for a moment. Nothing was built or signed. Try again when the timer runs out."
     : noSol ? `Swaps need a little SOL on hand while they run${typeof p.solLamports === "number" ? `, and this wallet has ${solAmt(p.solLamports)} SOL` : ""}. Nothing was built or signed. Fixes are below.`
     : "None of these tokens could be swapped safely right now. Nothing was built or signed. Reasons and fixes are below.";
   fill(heroEl,
@@ -1802,7 +1802,7 @@ function drawCut() {
         p.feeApplied && h("li", {}, icon("flame", "i pink"), h("span", {}, `${burnSym()} is bought and burned inside each transaction, so it may show as 0 or a tiny + amount.`)),
         h("li", {}, icon("bolt"), h("span", {}, "Network fee is a fraction of a cent of SOL per transaction. A first-time token account for what you receive costs about 0.002 SOL of rent.")),
         closes > 0 && o.id !== SOL && h("li", {}, icon("refresh"), h("span", {}, `Closing ${plural(closes, "emptied account")} gives back about ${(closes * RENT_SOL).toFixed(4)} SOL of rent.`)),
-        h("li", {}, icon("spark"), h("span", {}, "Check the balance changes it shows. Duster never holds your funds or keys, and nothing is sent until you approve.")))));
+        h("li", {}, icon("spark"), h("span", {}, "Check the balance changes it shows. Spacedust never holds your funds or keys, and nothing is sent until you approve.")))));
   }
   if (p.feeApplied && n) cards.push(h("div", { class: "burn-card frame" },
     h("p", { class: "overline pink" }, "the burn"),
@@ -1942,7 +1942,7 @@ function swapCinema() {
       unverifiedOut(o) && h("li", { class: "ask-warn" }, icon("warn", "i warn"), h("span", {}, h("b", {}, "Unverified token coming in. "), "Its address: ", h("span", { class: "mono mint-inline" }, o.id))),
       h("li", {}, icon("spark"), h("span", {}, "You’ll see ", h("b", {}, `${plural(n, "token")} leaving`), ". Coming in: ", receiveLine(p, t, n), ".")),
       p.feeApplied && h("li", {}, icon("flame", "i pink"), h("span", {}, `${burnSym()} may show as 0. It’s bought and burned inside each transaction.`)),
-      h("li", {}, icon("spark"), h("span", {}, "Duster never holds your funds or keys. Your wallet signs."))] };
+      h("li", {}, icon("spark"), h("span", {}, "Spacedust never holds your funds or keys. Your wallet signs."))] };
 }
 function showCinema({ n, facts, items }) {
   closeAllPops();
@@ -1953,12 +1953,17 @@ function showCinema({ n, facts, items }) {
   clearTimeout(hintT); hintT = setTimeout(() => { $("#cinemaStuck").hidden = false; }, 15000);
   const c = $("#cinema"); c.classList.remove("out"); c.hidden = false;
   root.classList.add("cinema-on");
+  // Dusty goes to work on loop while the wallet is open (the poster frame holds still for reduced motion)
+  const reel = $("#cinemaReel");
+  reel.preload = "auto";
+  if (!reduced()) { reel.currentTime = 0; reel.play().catch(() => {}); }
   $("#main").inert = true; $("#barTop").inert = true; $("#barBot").inert = true;
   c.focus({ preventScroll: true });
   renderSlate(); renderBar();
 }
 function hideCinema(instant = false) {
   clearTimeout(hintT);
+  $("#cinemaReel").pause();
   const c = $("#cinema");
   root.classList.remove("cinema-on");
   $("#main").inert = false; $("#barTop").inert = false; $("#barBot").inert = false;
@@ -2006,7 +2011,7 @@ function humanErr(err, kind = "swap") {
   if (/BlockhashNotFound/.test(s)) return "It expired before it landed.";
   return "It failed on-chain.";
 }
-const CHECKING = "No clear answer from the network yet, so Duster is checking by signature…";
+const CHECKING = "No clear answer from the network yet, so Spacedust is checking by signature…";
 // What a transaction that didn't land means, per flow. Everything else about sending and confirming is shared.
 const SWAP_COPY = {
   kind: "swap",
@@ -2030,7 +2035,7 @@ async function runSend(signed, lastValid, keptHash = []) {
   state.run = { kind: "swap", items: t.items.map((x, i) => ({ ...x, i, status: "sending", sig: sigOf(signed[i]), note: null, lastValid: keptHash[i] ? lv : null, past: 0 })), done: false, out: p.out, feeApplied: p.feeApplied, burnMint: p.burnMint, close: p.set.close, sim: !!dev?.simulated };
   await go("drop");
   if (ep !== state.epoch) return;
-  $("#stampWrap").hidden = true; $("#result").hidden = true; $("#drop-title").classList.remove("as-stamp");
+  $("#stampWrap").hidden = true; $("#result").hidden = true; $("#drop-title").classList.remove("as-stamp"); showComplete(false);
   $("#drop-title").textContent = "sendin’ it";
   $("#dropFacts").textContent = `${plural(p.txs.length, "transaction")} signed. Sending them now. Each one lands on its own, so a slow one never holds up the rest.`;
   renderSimNote();
@@ -2175,18 +2180,20 @@ function renderResult() {
     $("#stampWrap").hidden = false; title.classList.add("as-stamp"); title.textContent = "dusted: all clean";
     $("#stampText").textContent = "dusted"; $("#stamp").classList.remove("long");
     const st = $("#stamp"); st.classList.remove("slam"); void st.offsetWidth; if (!reduced()) st.classList.add("slam");
-    setPose(m, 5, { mode: "jump" });
+    showComplete(true);
     feathers();
   } else if (!ok.length) {
     const allExp = bad.every((b) => b.status === "expired" || b.status === "never");
     title.classList.remove("as-stamp"); title.textContent = allExp ? "it expired before landing" : "nothing landed";
     $("#dropFacts").textContent = allExp ? "Solana transactions are only valid for about a minute, and these didn’t land in time. Nothing happened on-chain. Preview again to get fresh ones." : "None of these went through. Nothing was swapped or burned, and your tokens are still in your wallet. Details are below each one.";
     $("#stampWrap").hidden = true;
+    showComplete(false);
     setPose(m, 1);
   } else {
     title.classList.remove("as-stamp"); title.textContent = "mostly clean";
     $("#dropFacts").textContent = `${bad.length} didn’t go through, and ${bad.length === 1 ? "that token is" : "those tokens are"} still in your wallet. The other ${ok.length} landed.`;
     $("#stampWrap").hidden = true;
+    showComplete(false);
     setPose(m, 4);
   }
   if (!ok.length) { fill(res, h("p", { class: "result-note" }, "No swaps happened and no fee was taken. Your tokens haven’t moved.")); return; }
@@ -2228,9 +2235,19 @@ function embers(stat) {
     setTimeout(() => e.remove(), 1800);
   }
 }
+// When a whole run lands, the finished screen trades the mascot for Dusty with a stack of SOL.
+const COMPLETE_ART = "/img/dusty/complete.webp";
+function showComplete(on) {
+  const art = $("#completeArt"), m = sceneMascot("drop");
+  if (!art.getAttribute("src")) art.src = COMPLETE_ART;
+  art.hidden = !on; m.hidden = on;
+  art.classList.remove("pop");
+  if (on && !reduced()) { void art.offsetWidth; art.classList.add("pop"); }
+}
 function feathers() {
   if (reduced()) return;
-  const m = sceneMascot("drop").getBoundingClientRect();
+  const art = $("#completeArt");
+  const m = (art.hidden ? sceneMascot("drop") : art).getBoundingClientRect();
   for (let i = 0; i < 9; i++) {
     const s = svgEl("svg", { class: "feather", viewBox: "0 0 24 24", "aria-hidden": "true" },
       svgEl("path", { d: "M4 20c3-9 8-14 16-16-1 8-6 13-14 15M6 18l7-8", fill: "none", stroke: "currentColor", "stroke-width": "1.3", "stroke-linecap": "round" }),
@@ -2248,7 +2265,7 @@ function feathers() {
 async function copySummary() {
   const r = state.run, o = r.out, ok = r.items.filter((i) => i.status === "confirmed");
   const recv = ok.reduce((a, t) => a + t.receive, 0), burned = ok.reduce((a, t) => a + (t.fee?.burned || 0), 0);
-  const text = `duster: ${ok.length} of ${r.items.length} confirmed. ≈ ${outAmt(recv, o)} ${symOf(o)} received${burned ? `, ${int(burned)} ${burnSym()} burned` : ""}.${r.sim ? " (dev simulation, nothing was sent)" : ""}\n` + ok.map((t) => `https://solscan.io/tx/${t.sig}`).join("\n");
+  const text = `spacedust: ${ok.length} of ${r.items.length} confirmed. ≈ ${outAmt(recv, o)} ${symOf(o)} received${burned ? `, ${int(burned)} ${burnSym()} burned` : ""}.${r.sim ? " (dev simulation, nothing was sent)" : ""}\n` + ok.map((t) => `https://solscan.io/tx/${t.sig}`).join("\n");
   try { await navigator.clipboard.writeText(text); toast({ title: "summary copied", tone: "ok", timeout: 2200 }); }
   catch { toast({ title: "couldn’t copy", body: "Your browser blocked clipboard access." }); }
 }
@@ -2537,7 +2554,7 @@ function drawRcPick() {
     $("#rcFacts").textContent = blocked.length
       ? `${plural(blocked.length, "account")} can’t be closed by this wallet (the reasons are below)${holding.length ? `, and ${plural(holding.length, "other")} still ${holds} something worth keeping or selling` : ""}.`
       : holding.length ? "Every token account in this wallet still holds something worth keeping or selling, so there’s nothing to close."
-      : nftHeld ? `Every account in this wallet holds ${alone.coll ? (alone.nfts ? "an NFT or a collectible" : "a collectible") : "an NFT"}, and Duster leaves those alone, so there’s nothing to close.`
+      : nftHeld ? `Every account in this wallet holds ${alone.coll ? (alone.nfts ? "an NFT or a collectible" : "a collectible") : "an NFT"}, and Spacedust leaves those alone, so there’s nothing to close.`
       : alone.unchecked ? "Every account in this wallet still holds something, and some couldn’t be checked just now, so there’s nothing to close."
       : "This wallet has no token accounts besides SOL itself, so there’s nothing to close.";
     // the bar carries "back to your dust"; the card only offers what the bar doesn't
@@ -2622,7 +2639,7 @@ function drawRcPick() {
 function rcLeftAlone({ nfts, coll, unchecked }) {
   const n = nfts + coll;
   return (n > 0 || unchecked > 0) && h("p", { class: "hint left-alone" }, icon("info", "i i-sm"), h("span", {},
-    n ? `${leftAlonePhrase(nfts, coll)} in this wallet ${n === 1 ? "is" : "are"} left alone. Duster never closes, sells or burns an account that holds one.` : "",
+    n ? `${leftAlonePhrase(nfts, coll)} in this wallet ${n === 1 ? "is" : "are"} left alone. Spacedust never closes, sells or burns an account that holds one.` : "",
     unchecked ? [n ? " " : "", `${plural(unchecked, "account")} couldn’t be checked just now, so ${unchecked === 1 ? "it’s" : "they’re"} left alone too. `,
       h("button", { class: "btn-text sm", type: "button", onclick: () => loadAccounts() }, "check again")] : ""));
 }
@@ -2753,7 +2770,7 @@ function rcHeroPick(picked = rcPicked()) {
 function rcHowCard() {
   return h("div", { class: "card" }, h("p", { class: "overline" }, "how the cleanup works"), h("ul", { class: "ask-list" },
     h("li", {}, icon("spark"), h("span", {}, "Every token account holds about ", h("b", {}, "0.002 SOL of rent"), ". Closing an empty one sends it back to your wallet.")),
-    h("li", {}, icon("spark"), h("span", {}, h("b", {}, "No fee. "), "Duster adds nothing to these transactions. You pay only the network fee, a fraction of a cent each.")),
+    h("li", {}, icon("spark"), h("span", {}, h("b", {}, "No fee. "), "Spacedust adds nothing to these transactions. You pay only the network fee, a fraction of a cent each.")),
     h("li", {}, icon("wallet"), h("span", {}, "About 25 closes fit in one transaction, and your wallet asks once for all of them.")),
     h("li", {}, icon("spark"), h("span", {}, "Nothing is lost: if a token comes back to this wallet later, a new account is opened for it then."))));
 }
@@ -2847,9 +2864,9 @@ function drawRcReview() {
         burns > 0 && h("li", { class: "ask-warn" }, icon("flame", "i pink"), h("span", {}, h("b", {}, `${plural(burns, "token")} ${burns === 1 ? "leaves" : "leave"} for good. `), `${burns === 1 ? "It’s" : "They’re"} burned, not sold, and that can’t be undone.`)),
         // network fees are tiny (~0.000005 SOL each), so they get significant digits rather than four decimals
         h("li", {}, icon("bolt"), h("span", {}, `Network fee about ${(fee / 1e9).toLocaleString("en-US", { maximumSignificantDigits: 2 })} SOL${n > 1 ? ` for all ${n}` : ""}, paid from your SOL balance.`)),
-        h("li", {}, icon("spark"), h("span", {}, "Check the balance changes it shows. Duster never holds your funds or keys, and nothing is sent until you approve.")))),
+        h("li", {}, icon("spark"), h("span", {}, "Check the balance changes it shows. Spacedust never holds your funds or keys, and nothing is sent until you approve.")))),
     n > 0 && h("div", { class: "burn-card frame nofee-state" }, h("p", { class: "overline green" }, "no fee"),
-      h("p", { class: "hint", style: "color:var(--lav-2)" }, "Duster adds nothing to the cleanup. The rent goes back to the wallet that paid it.")));
+      h("p", { class: "hint", style: "color:var(--lav-2)" }, "Spacedust adds nothing to the cleanup. The rent goes back to the wallet that paid it.")));
 }
 
 /* ---- the bottom bar ---- */
@@ -2959,7 +2976,7 @@ function rcCinema(p) {
     items: [
       h("li", {}, icon("spark"), h("span", {}, "Coming in: ", h("b", {}, `${solApprox(back)} SOL`), ` from closing ${plural(accts, "account")}.`)),
       p.burns > 0 && h("li", { class: "ask-warn" }, icon("flame", "i pink"), h("span", {}, h("b", {}, `${plural(p.burns, "token")} ${p.burns === 1 ? "leaves" : "leave"} for good. `), "Burned, not sold.")),
-      h("li", {}, icon("spark"), h("span", {}, "No fee. Duster never holds your funds or keys. Your wallet signs."))] };
+      h("li", {}, icon("spark"), h("span", {}, "No fee. Spacedust never holds your funds or keys. Your wallet signs."))] };
 }
 async function approveReclaim() {
   const rc = state.rc, p = rc.plan;
@@ -3018,7 +3035,7 @@ async function runReclaimSend(signed, lastValid, keptHash = []) {
   state.run = { kind: "reclaim", items: p.txs.map((t, i) => ({ ...t, i, status: "sending", sig: sigOf(signed[i]), note: null, lastValid: keptHash[i] ? lv : null, past: 0 })), done: false, sim: !!dev?.simulated };
   await go("drop");
   if (ep !== state.epoch) return;
-  $("#stampWrap").hidden = true; $("#result").hidden = true; $("#drop-title").classList.remove("as-stamp");
+  $("#stampWrap").hidden = true; $("#result").hidden = true; $("#drop-title").classList.remove("as-stamp"); showComplete(false);
   $("#drop-title").textContent = "sendin’ it";
   $("#dropFacts").textContent = `${plural(p.txs.length, "transaction")} signed. Sending them now. Each one lands on its own, so a slow one never holds up the rest.`;
   renderSimNote();
@@ -3066,18 +3083,20 @@ function renderReclaimResult() {
     $("#stampWrap").hidden = false; title.classList.add("as-stamp"); title.textContent = "rent’s back: all aired out";
     $("#stampText").textContent = "rent’s back"; $("#stamp").classList.add("long");
     const st = $("#stamp"); st.classList.remove("slam"); void st.offsetWidth; if (!reduced()) st.classList.add("slam");
-    setPose(m, 5, { mode: "jump" });
+    showComplete(true);
     feathers();
   } else if (!ok.length) {
     const allExp = bad.every((b) => b.status === "expired" || b.status === "never");
     title.classList.remove("as-stamp"); title.textContent = allExp ? "it expired before landing" : "nothing closed";
     $("#dropFacts").textContent = allExp ? "Solana transactions are only valid for about a minute, and these didn’t land in time. Nothing happened on-chain. Try again to get fresh ones." : "None of these went through. Nothing was closed or burned, and your accounts are as they were. Details are below each one.";
     $("#stampWrap").hidden = true;
+    showComplete(false);
     setPose(m, 1);
   } else {
     title.classList.remove("as-stamp"); title.textContent = "mostly aired out";
     $("#dropFacts").textContent = `${plural(bad.length, "transaction")} didn’t go through, so ${bad.length === 1 ? "its accounts are" : "their accounts are"} still open. The other ${ok.length} landed: about ${solAmt(back)} SOL is back.`;
     $("#stampWrap").hidden = true;
+    showComplete(false);
     setPose(m, 4);
   }
   if (!ok.length) { fill(res, h("p", { class: "result-note" }, "Nothing was closed and no fee was taken. Your accounts haven’t changed.")); return; }
@@ -3115,7 +3134,7 @@ function rcRetry(failed) {
 async function rcCopySummary() {
   const r = state.run, ok = r.items.filter((i) => i.status === "confirmed");
   const back = ok.reduce((a, t) => a + t.lamports, 0), closed = ok.reduce((a, t) => a + t.accounts.length, 0);
-  const text = `duster cleanup: ${ok.length} of ${r.items.length} confirmed. ${solApprox(back)} SOL of rent back from ${plural(closed, "closed account")}, no fee.${r.sim ? " (dev simulation, nothing was sent)" : ""}\n` + ok.map((t) => `https://solscan.io/tx/${t.sig}`).join("\n");
+  const text = `spacedust cleanup: ${ok.length} of ${r.items.length} confirmed. ${solApprox(back)} SOL of rent back from ${plural(closed, "closed account")}, no fee.${r.sim ? " (dev simulation, nothing was sent)" : ""}\n` + ok.map((t) => `https://solscan.io/tx/${t.sig}`).join("\n");
   try { await navigator.clipboard.writeText(text); toast({ title: "summary copied", tone: "ok", timeout: 2200 }); }
   catch { toast({ title: "couldn’t copy", body: "Your browser blocked clipboard access." }); }
 }

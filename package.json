@@ -6,7 +6,8 @@
   "scripts": {
     "start": "tsx --env-file-if-exists=.env src/index.ts",
     "web": "tsx --env-file-if-exists=.env src/server.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:home": "esbuild home/scene.js --bundle --minify --format=esm --target=es2020 --legal-comments=eof --outfile=public/home/scene.js"
   },
   "dependencies": {
     "@solana/spl-token": "^0.4.15",
@@ -16,6 +17,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
+    "esbuild": "0.28.2",
+    "three": "0.160.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   },
