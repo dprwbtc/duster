@@ -327,7 +327,7 @@ html[data-scene="title"] .bar-fine { display: block; }
 .mascot.jump img { animation: jump .9s var(--pop) 1; }
 @keyframes jump { 0% { translate: 0 0; } 30% { translate: 0 -22px; } 60% { translate: 0 0; } 75% { translate: 0 -5px; } 100% { translate: 0 0; } }
 .mascot-cameo { height: clamp(104px, 13vw, 156px); min-width: 80px; margin-bottom: -6px; display: flex; justify-content: center; align-items: flex-end; }
-/* the finished screen: Dusty with a stack of SOL, larger than the cameo it replaces */
+/* the finished screen: the droid with a stack of SOL, larger than the cameo it replaces */
 .complete-art { height: clamp(150px, 20vw, 270px); width: auto; max-width: 100%; margin-bottom: -10px; filter: drop-shadow(0 0 26px rgb(244 206 127 / .28)) drop-shadow(0 12px 18px rgb(0 0 0 / .55)); }
 .complete-art.pop { animation: art-pop .7s var(--pop) both; }
 @keyframes art-pop { from { opacity: 0; transform: translateY(14px) scale(.9); } to { opacity: 1; transform: none; } }
@@ -561,7 +561,7 @@ html.revisit .title-card > *, html.revisit .hero-stage { animation-delay: .05s; 
 }
 .sweep .duster {
   position: absolute; top: 50%; left: 0; width: 48px; height: 66px; margin-top: -33px;
-  background: url("/img/dusty/duster-feather.webp") center / contain no-repeat;
+  background: url("/img/droid/duster-feather.webp") center / contain no-repeat;
   filter: drop-shadow(0 4px 6px rgb(0 0 0 / .45));
   opacity: 0;
 }
@@ -799,7 +799,7 @@ button.flag:hover { color: var(--text); box-shadow: inset 0 0 0 1px rgb(242 179 
 @keyframes fadein { from { opacity: 0; } }
 @keyframes fadeout { to { opacity: 0; } }
 .cinema-in { max-width: 520px; text-align: center; display: grid; justify-items: center; }
-/* the wallet prompt plays Dusty dusting, framed like a screen (the clip is a full-frame scene on white) */
+/* the wallet prompt plays the dusting clip, framed like a screen (the clip is a full-frame scene on white) */
 .cinema-reel { width: min(460px, 100%); max-width: 100%; aspect-ratio: 752 / 416; margin-bottom: 20px; border-radius: 14px; overflow: hidden; background: #fdfdfd; border: 1px solid rgb(255 255 255 / .16); box-shadow: 0 0 0 6px rgb(0 0 0 / .35), 0 24px 60px rgb(0 0 0 / .55), 0 0 70px rgb(244 206 127 / .14); animation: reel-in .55s var(--pop) both; }
 .cinema-reel video { display: block; width: 100%; height: 100%; object-fit: cover; }
 @keyframes reel-in { from { opacity: 0; transform: translateY(10px) scale(.95); } }
@@ -1132,7 +1132,7 @@ html.revisit .bar-top .bar-in, html.revisit .bar-bot .bar-in { animation: none; 
   .rc-hero .ch-big { font-size: clamp(24px, 8.6vw, 34px); white-space: nowrap; }
   .rc-hero .ch-sub { font-size: 12px; white-space: normal; }
   .rc-tracklist .tl-col, .rc-wsol .tl-col { display: none; }
-  /* stays in the text column, clear of Dusty and the name sticker */
+  /* stays in the text column, clear of the droid */
   .hero-alt { margin-top: 6px; max-width: 54%; }
   .tx .ico-stack { width: 32px; height: 32px; }
   .tx .ico-stack .tok-ico { width: 22px; height: 22px; }

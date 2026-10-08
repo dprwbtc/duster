@@ -247,7 +247,7 @@ function srSay(text) { const el = $("#srStatus"); clearTimeout(srT); el.textCont
 
 /* ================= mascot ================= */
 const POSE_DIMS = { 1: [191, 326], 2: [246, 326], 3: [245, 325], 4: [160, 321], 5: [303, 325], 6: [242, 317], 7: [259, 334], 8: [252, 312], 9: [248, 314], 10: [285, 309], 11: [308, 314], 12: [274, 312], 13: [212, 312], 14: [262, 321], 15: [263, 318], 16: [259, 320], 17: [189, 319], 18: [261, 321], 19: [222, 322] };
-const pose = (n) => `/img/dusty/pose-${String(n).padStart(2, "0")}.webp`;
+const pose = (n) => `/img/droid/pose-${String(n).padStart(2, "0")}.webp`;
 function setPose(btn, n, { mode = "idle", hop = true } = {}) {
   if (!btn) return;
   const img = btn.querySelector("img");
@@ -280,13 +280,6 @@ function react(n, back, ms = 1100) {
   clearTimeout(reactTimer);
   setPose(m, n);
   reactTimer = setTimeout(() => setPose(m, back, { hop: false }), ms);
-}
-function boop(btn) {
-  btn.classList.add("booped");
-  const before = btn.querySelector("img").getAttribute("src");
-  setPose(btn, 8);
-  clearTimeout(btn._b);
-  btn._b = setTimeout(() => { btn.classList.remove("booped"); const n = Number((before || "").match(/pose-(\d+)/)?.[1]); if (n) setPose(btn, n, { hop: false }); }, 1300);
 }
 
 /* ================= toasts (die-cut stickers) ================= */
@@ -1087,7 +1080,7 @@ function syncRows({ flip = false, stagger = false } = {}) {
     if (dy) el.animate([{ translate: `0 ${dy}px` }, { translate: "0 0" }], { duration: 380, easing: getComputedStyle(root).getPropertyValue("--spring").trim() || "ease-out" });
   }
 }
-// a small dusk still with Dusty large and centred, for the empty and error states
+// a small dusk still with the droid large and centred, for the empty and error states
 function stateStill(n, line, sub) {
   const [w, hh] = POSE_DIMS[n] || [254, 334];
   return h("div", { class: "state-still" },
@@ -1912,7 +1905,7 @@ function showCinema({ n, facts, items }) {
   clearTimeout(hintT); hintT = setTimeout(() => { $("#cinemaStuck").hidden = false; }, 15000);
   const c = $("#cinema"); c.classList.remove("out"); c.hidden = false;
   root.classList.add("cinema-on");
-  // Dusty goes to work on loop while the wallet is open (the poster frame holds still for reduced motion)
+  // the dusting clip loops while the wallet is open (the poster frame holds still for reduced motion)
   const reel = $("#cinemaReel");
   reel.preload = "auto";
   if (!reduced()) { reel.currentTime = 0; reel.play().catch(() => {}); }
@@ -2193,8 +2186,8 @@ function embers(stat) {
     setTimeout(() => e.remove(), 1800);
   }
 }
-// When a whole run lands, the finished screen trades the mascot for Dusty with a stack of SOL.
-const COMPLETE_ART = "/img/dusty/complete.webp";
+// When a whole run lands, the finished screen trades the mascot for the droid with a stack of SOL.
+const COMPLETE_ART = "/img/droid/complete.webp";
 function showComplete(on) {
   const art = $("#completeArt"), m = sceneMascot("drop");
   if (!art.getAttribute("src")) art.src = COMPLETE_ART;
@@ -3095,7 +3088,7 @@ async function rcCopySummary() {
   catch { toast({ title: "couldn’t copy", body: "Your browser blocked clipboard access." }); }
 }
 
-/* ================= copy buttons, mascot boops ================= */
+/* ================= copy buttons ================= */
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("[data-copy]"); if (!b) return;
   const text = b.dataset.copy === "mint" ? state.plan?.burnMint || burnId() || "" : state.account?.address || "";
@@ -3105,7 +3098,6 @@ document.addEventListener("click", async (e) => {
   const u = b.querySelector("use"); if (u && ok) { u.setAttribute("href", "#i-check"); setTimeout(() => u.setAttribute("href", "#i-copy"), 1200); }
   toast(ok ? { title: b.dataset.copy === "mint" ? "mint address copied" : "address copied", tone: "ok", timeout: 2000 } : { title: "couldn’t copy", body: "Your browser blocked clipboard access. Select the text instead." });
 });
-document.addEventListener("click", (e) => { const m = e.target.closest(".mascot"); if (m && m.tagName === "BUTTON") boop(m); });
 
 /* ================= boot ================= */
 const app = {
