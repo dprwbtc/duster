@@ -155,7 +155,9 @@ img { display: block; max-width: 100%; }
   background: linear-gradient(180deg, #fff3cf, var(--flare) 35%, var(--gold) 60%, var(--gold-deep));
   -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 1px 0 rgb(74 46 12 / .9));
-  padding: 6px 6px 8px 2px;
+  /* the script's lead-in and the t's crossbar reach past the glyph box, and the gradient only paints inside the
+     padding, so the padding is generous and the negative margins keep the layout where it was */
+  padding: .17em .4em .28em .34em; margin-inline: -.28em -.14em;
 }
 .brand-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--sith); margin-left: 1px; box-shadow: 0 0 10px var(--sith); translate: 0 8px; }
 
@@ -370,21 +372,9 @@ html[data-scene="title"] .bar-fine { display: block; }
   padding: clamp(18px, 3vh, 40px) var(--gutter) clamp(84px, 13vh, 170px);
 }
 
-/* the nameplate: script "spacedust" with a specular bevel */
-.plate { position: relative; width: clamp(280px, 40vw, 540px); margin: 0 0 6px -1.5%; font-size: inherit; }
-.plate-svg { display: block; width: 100%; height: auto; overflow: visible; }
-.plate-svg.enter { animation: plate-in .9s var(--ease-out) both; }
-@keyframes plate-in { from { opacity: 0; transform: translateY(12px); } }
-.plate-text { font-family: var(--f-script); font-size: 196px; letter-spacing: 2px; }
-.plate-glint { color: #fff; transform-box: fill-box; transform-origin: center; opacity: 0; filter: drop-shadow(0 0 4px #fff) drop-shadow(0 0 10px rgb(244 206 127 / .9)); animation: glint 7s 2.6s ease-in-out infinite; }
-@keyframes glint {
-  0%, 82%, 100% { opacity: 0; transform: scale(.2) rotate(0); }
-  88% { opacity: 1; transform: scale(1) rotate(45deg); }
-  94% { opacity: 0; transform: scale(.3) rotate(90deg); }
-}
 
 .tagline {
-  font: 600 clamp(34px, min(3.6vw, 5.4vh), 46px)/1 var(--f-display);
+  font: 600 clamp(40px, min(4.6vw, 7vh), 60px)/1 var(--f-display);
   text-transform: lowercase; letter-spacing: -.005em; color: var(--text);
   margin-bottom: 16px; max-width: 18ch; text-wrap: balance;
   text-shadow: 0 2px 14px rgb(7 14 36 / .7);
@@ -417,13 +407,10 @@ html[data-scene="title"] .bar-fine { display: block; }
 
 /* title reveal choreography (after the shutters open) */
 .title-card > * { opacity: 0; translate: 0 14px; animation: rise .9s var(--ease-out) forwards; }
-.title-card > .plate { opacity: 1; translate: 0 0; animation: none; }
+.title-card > :nth-child(1) { animation-delay: 1.05s; }
 .title-card > :nth-child(2) { animation-delay: 1.15s; }
 .title-card > :nth-child(3) { animation-delay: 1.25s; }
-.title-card > :nth-child(4) { animation-delay: 1.35s; }
-.title-card > :nth-child(5) { animation-delay: 1.45s; }
 @keyframes rise { to { opacity: 1; translate: 0 0; } }
-.plate-svg:not(.enter):not(.ready) { opacity: 0; }
 html.revisit .title-card > *, html.revisit .hero-stage { animation-delay: .05s; animation-duration: .5s; }
 
 /* how it works, below the title */
@@ -1049,12 +1036,8 @@ html.revisit .bar-top .bar-in, html.revisit .bar-bot .bar-in { animation: none; 
 .tok-ico::after { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(255 255 255 / .14); pointer-events: none; z-index: 1; }
 
 /* ================= the cleanup: rent back ================= */
-.hero-alt { margin-top: 14px; }
-.hero-alt .btn-text { color: #d6cfe7; padding-left: 0; text-align: left; text-shadow: 0 1px 8px rgb(7 10 26 / .95), 0 0 2px rgb(7 10 26 / .8); }
-.hero-alt .btn-text:hover { color: var(--flare); }
-.title-card > :nth-child(6) { animation-delay: 1.55s; }
 
-.liner-cleanup { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px 28px; margin-bottom: 48px; --c: rgb(110 231 168 / .45); }
+.liner-cleanup { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px 28px; margin-bottom: 40px; --c: rgb(110 231 168 / .45); }
 .liner-cleanup > div { flex: 1 1 420px; min-width: 0; }
 .liner-cleanup p:not(.overline) { color: var(--lav-2); font-size: 14px; max-width: 68ch; }
 .liner-cleanup .btn-ghost { flex: none; }
@@ -1134,8 +1117,6 @@ html.revisit .bar-top .bar-in, html.revisit .bar-bot .bar-in { animation: none; 
   .rc-hero .ch-big { font-size: clamp(24px, 8.6vw, 34px); white-space: nowrap; }
   .rc-hero .ch-sub { font-size: 12px; white-space: normal; }
   .rc-tracklist .tl-col, .rc-wsol .tl-col { display: none; }
-  /* stays in the text column, clear of the droid */
-  .hero-alt { margin-top: 6px; max-width: 54%; }
   .tx .ico-stack { width: 32px; height: 32px; }
   .tx .ico-stack .tok-ico { width: 22px; height: 22px; }
   .ico-stack .tok-ico:nth-child(2) { left: 14px; }
@@ -1185,8 +1166,7 @@ html.revisit .bar-top .bar-in, html.revisit .bar-bot .bar-in { animation: none; 
 
   .hero { align-items: start; }
   .title-card { padding-top: 26px; padding-bottom: 0; }
-  .plate { width: min(88vw, 360px); margin-bottom: 2px; }
-  .tagline { font-size: 29px; max-width: 14ch; margin-bottom: 12px; }
+  .tagline { font-size: 34px; max-width: 14ch; margin-bottom: 14px; }
   .hero-facts { font-size: 14.5px; margin-bottom: 20px; max-width: 34ch; }
   .cta-row { gap: 8px; }
   .cta-row .helper { width: 100%; max-width: 54%; }
@@ -1265,13 +1245,12 @@ html.revisit .bar-top .bar-in, html.revisit .bar-bot .bar-in { animation: none; 
 }
 @media (max-height: 700px) and (max-width: 640px) {
   .hero-stage { height: 130px; }
-  .plate { width: min(76vw, 300px); }
-  .tagline { font-size: 26px; }
+  .tagline { font-size: 30px; }
 }
 
 /* tablet portrait / small laptops: the title text and the mascot stop overlapping */
 @media (min-width: 641px) and (max-width: 1024px) {
-  .title-card > :not(.plate) { max-width: 54%; }
+  .title-card > * { max-width: 54%; }
   .hero-facts { max-width: 40ch; }
   .hero-stage { left: auto; right: 2%; translate: 0 0; height: min(34vh, 320px); }
   @keyframes enter-m { from { opacity: 0; translate: 0 18px; } to { opacity: 1; translate: 0 0; } }
@@ -1315,9 +1294,9 @@ html.revisit .bar-top .bar-in, html.revisit .bar-bot .bar-in { animation: none; 
 /* ================= reduced motion =================
    Feedback stays (fast opacity), travel goes. */
 html.rm *, html.rm *::before, html.rm *::after { animation-duration: .01ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: .15s !important; transition-delay: 0s !important; }
-html.rm .trails .orbit, html.rm .mascot img, html.rm .complete-art, html.rm .cinema-reel, html.rm .progress-track::after, html.rm .plate-glint { animation: none !important; }
+html.rm .trails .orbit, html.rm .mascot img, html.rm .complete-art, html.rm .cinema-reel, html.rm .progress-track::after { animation: none !important; }
 html.rm ::view-transition-group(*), html.rm ::view-transition-old(*), html.rm ::view-transition-new(*) { animation-duration: .01ms !important; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: .15s !important; }
-  .trails .orbit, .mascot img, .complete-art, .cinema-reel, .progress-track::after, .plate-glint { animation: none !important; }
+  .trails .orbit, .mascot img, .complete-art, .cinema-reel, .progress-track::after { animation: none !important; }
 }
