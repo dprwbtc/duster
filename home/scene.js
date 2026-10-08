@@ -269,21 +269,6 @@ function pace(now) {
   }
   return true;
 }
-// lilvader.space/?fps shows the frame rate and the resolution step, to check a device by eye
-if (new URLSearchParams(location.search).has("fps")) {
-  const el = document.createElement("div");
-  el.style.cssText = "position:fixed;left:10px;bottom:10px;z-index:9;padding:4px 8px;border-radius:6px;background:rgba(0,0,0,.7);color:#9f9;font:12px/1.3 ui-monospace,monospace;pointer-events:none";
-  document.body.append(el);
-  let frames = 0, since = performance.now();
-  const count = () => { frames++; requestAnimationFrame(count); };
-  requestAnimationFrame(count);
-  setInterval(() => {
-    const now = performance.now(), fps = (frames * 1000) / (now - since);
-    el.textContent = `${Math.round(lock30 ? Math.min(fps, 30) : fps)} fps · ${renderer.getPixelRatio()}x${lock30 ? " · 30 lock" : ""}${phone ? " · phone" : ""}`;
-    frames = 0; since = now;
-  }, 500);
-}
-
 // ---------- first paint ----------
 // The page stays hidden (see index.html) until the title's font is in and the first frame is drawn, so the title
 // never flashes in a fallback font, the chain never refits around a font swap, and the drop starts when it shows.
