@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en" data-scene="title">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>spacedust · sell your dust in one prompt</title>
+<meta name="description" content="Sell a pile of small Solana tokens in one wallet prompt. Each token gets its own transaction, and your wallet signs them all at once. Spacedust never holds your funds or keys.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="spacedust · sell your dust in one prompt">
+<meta property="og:description" content="Sell a pile of small Solana tokens in one wallet prompt. Spacedust never holds your funds or keys.">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#010101">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="/fonts/inter-400_700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/mr-dafoe-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/fonts/fonts.css">
+<link rel="stylesheet" href="/styles.css">
+<script type="module" src="/app.js"></script>
+<script defer src="/_vercel/insights/script.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">skip to content</a>
+
+<!-- shared SVG: gradients, the nameplate bevel, tattoo-flash glyphs -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="swashGrad" x1="0" x2="1"><stop offset="0" stop-color="#9E6C25" stop-opacity=".2"/><stop offset=".35" stop-color="#F4CE7F"/><stop offset="1" stop-color="#DEB25F" stop-opacity=".5"/></linearGradient>
+    <linearGradient id="g-gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF6D6"/><stop offset=".22" stop-color="#F4CE7F"/><stop offset=".5" stop-color="#DEB25F"/>
+      <stop offset=".72" stop-color="#9E6C25"/><stop offset=".9" stop-color="#E6BE6E"/><stop offset="1" stop-color="#FCE9B4"/>
+    </linearGradient>
+    <linearGradient id="gChrome" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F9EEDB"/><stop offset=".45" stop-color="#919191"/><stop offset=".7" stop-color="#3C3A38"/><stop offset="1" stop-color="#CFCAC2"/></linearGradient>
+    <linearGradient id="gGold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FAFAC8"/><stop offset=".35" stop-color="#F4CE7F"/><stop offset=".65" stop-color="#DEB25F"/><stop offset="1" stop-color="#9E6C25"/></linearGradient>
+    <linearGradient id="gRed" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb4ad"/><stop offset=".5" stop-color="#FF4B3E"/><stop offset="1" stop-color="#8C2322"/></linearGradient>
+    <filter id="f-bevel" x="-10%" y="-20%" width="120%" height="150%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.6" result="b"/>
+      <feSpecularLighting in="b" surfaceScale="3.2" specularConstant=".95" specularExponent="18" lighting-color="#FFF4D0" result="s"><fePointLight x="-120" y="-260" z="220"/></feSpecularLighting>
+      <feComposite in="s" in2="SourceAlpha" operator="in" result="si"/>
+      <feComposite in="SourceGraphic" in2="si" operator="arithmetic" k1="0" k2="1" k3=".85" k4="0" result="lit"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="0" flood-color="#4A2E0C" flood-opacity="1" result="edge"/>
+      <feDropShadow in="edge" dx="0" dy="10" stdDeviation="9" flood-color="#000" flood-opacity=".55"/>
+    </filter>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 1.5c.7 6.3 3.9 9.6 10.5 10.5-6.6.9-9.8 4.2-10.5 10.5-.7-6.3-3.9-9.6-10.5-10.5C8.1 11.1 11.3 7.8 12 1.5z" fill="currentColor"/></symbol>
+    <symbol id="i-seal" viewBox="0 0 24 24"><path d="M12 2.2l2.3 1.7 2.8-.2.9 2.7 2.4 1.5-.9 2.7.9 2.7-2.4 1.5-.9 2.7-2.8-.2L12 19l-2.3-1.7-2.8.2-.9-2.7-2.4-1.5.9-2.7-.9-2.7 2.4-1.5.9-2.7 2.8.2z" fill="currentColor" opacity=".9"/><path d="m8.4 10.9 2.5 2.5 4.8-4.8" stroke="#070e24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.5 2 5 13.2h6L9.8 22 19 10.4h-6.2z" fill="currentColor"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><g stroke="currentColor" stroke-width="1.5" fill="none"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M21.2 12h-2.6M5.4 12H2.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8M18.5 18.5l-1.8-1.8M7.3 7.3 5.5 5.5" stroke-linecap="round"/></g></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><g stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></g></symbol>
+    <symbol id="i-ext" viewBox="0 0 24 24"><path d="M9 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19h11a1.5 1.5 0 0 0 1.5-1.5V15M13 5h6v6M19 5l-8.5 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5" stroke-linecap="round"/></g><circle cx="12" cy="7.9" r="1.05" fill="currentColor"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3.5 21.5 20h-19z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 10v4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="17.2" r="1.05" fill="currentColor"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.2 4.2L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><g stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></g></symbol>
+    <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 2.5c.6 3.4 4.8 5.6 4.8 10.4A4.8 4.8 0 0 1 12 17.7a4.8 4.8 0 0 1-4.8-4.8c0-2.2 1.2-3.6 2.3-4.8.2 1.6.9 2.6 2 3.1C11.2 8.4 11.4 5.2 12 2.5z" fill="currentColor"/><path d="M12 21.5c-2.6 0-4.3-1.4-4.3-3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/></symbol>
+    <symbol id="i-wallet" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><rect x="4" y="8" width="16.5" height="11" rx="2.5"/><circle cx="16.3" cy="13.5" r="1.2" fill="currentColor"/></g></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19 8a7.5 7.5 0 1 0 .9 6"/><path d="M19.5 3.5V8H15"/></g></symbol>
+  </defs>
+</svg>
+
+<!-- opening shutters: the letterbox closes in from full black -->
+<div class="shutter top" id="shutterTop" aria-hidden="true"></div>
+<div class="shutter bot" id="shutterBot" aria-hidden="true"></div>
+
+<header class="bar bar-top" id="barTop">
+  <div class="bar-in">
+    <a class="brand" href="/dust" id="brand" aria-label="spacedust, back to the start"><span class="brand-script" aria-hidden="true">spacedust</span><span class="brand-dot" aria-hidden="true"></span></a>
+    <div class="bar-right" id="barRight">
+      <button class="wallet-chip" id="walletChip" type="button" popovertarget="walletPop" hidden>
+        <span class="idn" id="walletIdn" aria-hidden="true"></span>
+        <span class="mono" id="walletAddr"></span>
+        <svg class="i i-sm" aria-hidden="true"><use href="#i-chev"/></svg>
+      </button>
+      <button class="btn-ghost sm" id="topConnect" type="button">connect</button>
+    </div>
+  </div>
+</header>
+
+<main class="picture" id="main" tabindex="-1">
+
+  <!-- ===================== TITLE ===================== -->
+  <section class="scene scene-opening" data-scene="title" aria-labelledby="t-title">
+    <div class="hero">
+      <div class="still" aria-hidden="true">
+        <div class="sky"></div>
+        <svg class="trails" id="trails" preserveAspectRatio="xMidYMid slice"></svg>
+        <div class="sun"></div>
+        <svg class="skyline far" id="skyFar" preserveAspectRatio="xMidYMax slice"></svg>
+        <div class="haze"></div>
+        <svg class="skyline near" id="skyNear" preserveAspectRatio="xMidYMax slice"></svg>
+        <div class="ledge"></div>
+        <div class="grain"></div>
+        <div class="vignette"></div>
+      </div>
+
+      <div class="title-card">
+        <h1 id="t-title" class="plate">
+          <span class="sr">spacedust</span>
+          <svg class="plate-svg" id="plateSvg" viewBox="0 0 640 262" aria-hidden="true" focusable="false">
+            <text id="plateText" x="320" y="214" text-anchor="middle" class="plate-text" fill="url(#g-gold)" filter="url(#f-bevel)">spacedust</text>
+            <use href="#i-spark" class="plate-glint" id="plateGlint" width="26" height="26" x="0" y="0"/>
+          </svg>
+        </h1>
+        <p class="tagline">lil vader hates sand, and dust. let’s clean up your wallet.</p>
+        <p class="facts hero-facts" id="heroFacts">Pick up to 30 small tokens and swap them into SOL, USDC or USDT. Each token gets its own transaction, and your wallet asks once for all of them.</p>
+        <div class="cta-row">
+          <button class="btn-gold lg" id="heroConnect" type="button"><span>connect wallet</span><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+          <p class="helper">read-only until you approve something</p>
+        </div>
+        <p class="hero-alt"><button class="btn-text sm" type="button" data-reclaim><span class="m-hide">no dust? just reclaim rent from empty token accounts</span><span class="m-show">no dust? reclaim rent</span><svg class="i i-sm" aria-hidden="true"><use href="#i-arrow"/></svg></button></p>
+      </div>
+
+      <div class="hero-stage">
+        <div class="mascot mascot-hero" id="heroMascot" aria-hidden="true">
+          <span class="m-glow" aria-hidden="true"></span>
+          <img src="/img/droid/pose-02.webp" width="242" height="321" alt="" decoding="async" fetchpriority="low">
+          <span class="m-rim" aria-hidden="true"></span>
+        </div>
+      </div>
+      <a class="scroll-cue" href="#liner"><span>how it works</span><svg class="i i-sm" aria-hidden="true"><use href="#i-chev"/></svg></a>
+    </div>
+
+    <div class="liner" id="liner">
+      <div class="wrap">
+        <h2 class="sr">How it works</h2>
+        <ol class="liner-tracks">
+          <li><span class="tn">01</span><div><h3>connect</h3><p>Read-only. Spacedust looks at your token balances and prices. Nothing gets signed.</p></div></li>
+          <li><span class="tn">02</span><div><h3>pick your dust</h3><p>Everything under $2 is picked for you. Change the range, search, or untick anything. Up to 30 per run.</p></div></li>
+          <li><span class="tn">03</span><div><h3>approve once</h3><p>One wallet prompt. Each token gets its own transaction, so one bad route never takes the rest down with it.</p></div></li>
+        </ol>
+
+        <div class="liner-grid">
+          <div class="liner-burn frame" id="linerBurn" hidden>
+            <p class="overline pink">fee</p>
+            <h3 class="liner-h" id="linerBurnTitle">1% fee, bought and burned</h3>
+            <p id="linerBurnText"></p>
+            <div class="mint-row"><span class="mono mint-full" id="linerMint"></span><button class="icon-btn" type="button" data-copy="mint" aria-label="Copy the burn token mint address"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg></button></div>
+          </div>
+          <div class="liner-fine">
+            <p class="overline">fine print</p>
+            <p><b>Non-custodial.</b> Spacedust never holds your funds or keys. It builds transactions with Jupiter routing, simulates every one, and your wallet signs them. Check the balance changes your wallet shows before you approve.</p>
+            <p><b>Risks.</b> Swaps are final. Dust tokens often have little liquidity, and unverified tokens may be scams. Swaps that would lose more than your loss limit are skipped, but prices can still move. Provided as-is, with no warranty. Use at your own risk.</p>
+            <p id="feeFine" hidden></p>
+          </div>
+        </div>
+
+        <div class="liner-cleanup frame" id="linerCleanup">
+          <div>
+            <p class="overline green">rent · no fee</p>
+            <h3 class="liner-h">get your rent back</h3>
+            <p>Every token account locks about 0.002 SOL of rent, even after it’s empty. Spacedust closes the empty ones and sends that SOL back to your wallet, about 25 accounts per transaction, all in one prompt. Spacedust adds no fee. Dust under $1 can be burned and closed too, but only if you pick it.</p>
+          </div>
+          <button class="btn-ghost" type="button" data-reclaim>just reclaim rent<svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+        </div>
+        <p class="powered">token prices and routing powered by <a href="https://jup.ag" target="_blank" rel="noreferrer">Jup.ag</a></p>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== TOKEN LIST ===================== -->
+  <section class="scene" data-scene="pockets" aria-labelledby="pk-title" hidden>
+    <div class="wrap">
+      <header class="scene-head">
+        <div class="sh-text">
+          <h2 class="scene-title" id="pk-title">pick your dust</h2>
+          <p class="facts" id="pkFacts" aria-live="polite"></p>
+          <p class="pk-rentline" id="pkRentLine" hidden></p>
+        </div>
+        <div class="mascot mascot-cameo" data-mascot aria-hidden="true">
+          <img width="254" height="334" alt="" decoding="async">
+        </div>
+      </header>
+
+      <div class="pk-grid">
+        <div class="pk-main">
+          <div class="toolbar" id="toolbar">
+            <div class="seg" id="presets" role="group" aria-label="Value range">
+              <span class="seg-thumb" aria-hidden="true"></span>
+            </div>
+            <label class="search">
+              <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
+              <span class="sr">Search your tokens</span>
+              <input type="search" id="listSearch" placeholder="search your tokens" autocomplete="off" spellcheck="false">
+            </label>
+          </div>
+
+          <div class="tracklist" id="tracklist">
+            <div class="tl-head" id="tlHead">
+              <label class="tl-all">
+                <input type="checkbox" id="selAll" class="cb-input">
+                <span class="cb" aria-hidden="true"><svg class="i"><use href="#i-spark"/></svg><i class="dash"></i></span>
+                <span id="selAllLabel">select all shown</span>
+              </label>
+              <button class="btn-text sm" type="button" id="selClear">clear</button>
+              <span class="tl-col">worth</span>
+            </div>
+            <div class="rows" id="rows" role="group" aria-label="Your tokens"></div>
+            <div class="state-card" id="pkState" hidden></div>
+          </div>
+
+          <div class="kept" id="keptLine" hidden></div>
+          <details class="hidden-list" id="hiddenList" hidden>
+            <summary><span id="hiddenSummary"></span><svg class="i i-sm" aria-hidden="true"><use href="#i-chev"/></svg></summary>
+            <div class="hidden-rows" id="hiddenRows"></div>
+          </details>
+          <p class="hint left-alone" id="nftLine" hidden></p>
+        </div>
+
+        <aside class="pk-aside" aria-label="What you get">
+          <div class="aside-block into" id="intoBlock">
+            <p class="overline">swap into</p>
+            <div class="into-grid" id="intoGrid" role="radiogroup" aria-label="Swap into"></div>
+            <div class="into-custom" id="intoCustom" hidden></div>
+            <button class="btn-text sm other-btn" type="button" id="otherBtn" popovertarget="outPop"><svg class="i i-sm" aria-hidden="true"><use href="#i-search"/></svg>other token…</button>
+          </div>
+          <div class="aside-block burn-card frame" id="burnCard" hidden></div>
+          <div class="aside-block set-card" id="setCard">
+            <div>
+              <p class="overline">protection</p>
+              <p class="set-sum" id="setSum"></p>
+            </div>
+            <button class="btn-ghost sm" type="button" id="setBtn" popovertarget="setPop"><svg class="i i-sm" aria-hidden="true"><use href="#i-gear"/></svg>edit</button>
+          </div>
+          <!-- appears after the account read, below everything else, so nothing the user may be tapping moves -->
+          <div class="aside-block rent-card frame" id="rentCard" hidden></div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== RENT RECLAIM (list, then its review) ===================== -->
+  <section class="scene" data-scene="cleanup" aria-labelledby="rc-title" hidden>
+    <div class="wrap">
+      <header class="scene-head">
+        <div class="sh-text">
+          <button class="back-link" type="button" id="rcBack"><svg class="i i-sm" aria-hidden="true"><use href="#i-back"/></svg>back to your tokens</button>
+          <h2 class="scene-title" id="rc-title">reclaim rent</h2>
+          <p class="facts" id="rcFacts" aria-live="polite"></p>
+        </div>
+        <div class="mascot mascot-cameo" data-mascot aria-hidden="true">
+          <img width="254" height="334" alt="" decoding="async">
+        </div>
+      </header>
+
+      <div class="notice" id="rcNotice" role="status" hidden></div>
+      <div class="cut-hero rc-hero" id="rcHero" hidden></div>
+
+      <div class="cut-grid">
+        <div class="cut-main" id="rcMain"></div>
+        <aside class="cut-aside" id="rcAside" aria-label="About the cleanup"></aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== REVIEW ===================== -->
+  <section class="scene" data-scene="cut" aria-labelledby="cut-title" hidden>
+    <div class="wrap">
+      <header class="scene-head">
+        <div class="sh-text">
+          <button class="back-link" type="button" id="cutBack"><svg class="i i-sm" aria-hidden="true"><use href="#i-back"/></svg>back to your tokens</button>
+          <h2 class="scene-title" id="cut-title">review</h2>
+          <p class="facts" id="cutFacts" aria-live="polite"></p>
+        </div>
+        <div class="mascot mascot-cameo" data-mascot aria-hidden="true">
+          <img width="231" height="330" alt="" decoding="async">
+        </div>
+      </header>
+
+      <div class="notice" id="cutNotice" role="status" hidden></div>
+      <div class="notice warn" id="cutWarn" role="note" hidden></div>
+      <div class="cut-hero" id="cutHero"></div>
+
+      <div class="cut-grid">
+        <div class="cut-main">
+          <div class="overline list-label" id="cutListLabel">swaps</div>
+          <div class="progress" id="cutProgress" hidden>
+            <div class="progress-track"><span class="progress-fill" id="cutFill"></span></div>
+            <p class="progress-label" id="cutProgLabel"></p>
+          </div>
+          <ol class="tx-list" id="cutList"></ol>
+          <div class="skipped" id="cutSkipped" hidden></div>
+        </div>
+        <aside class="cut-aside" id="cutAside" aria-label="Before you approve"></aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SENDING AND RESULTS ===================== -->
+  <section class="scene" data-scene="drop" aria-labelledby="drop-title" hidden>
+    <div class="wrap">
+      <header class="scene-head">
+        <div class="sh-text">
+          <h2 class="scene-title" id="drop-title">sending</h2>
+          <div class="stamp-wrap" id="stampWrap" hidden>
+            <p class="stamp" id="stamp" aria-hidden="true"><span class="script-gold" id="stampText">done</span>
+              <svg class="swash" viewBox="0 0 420 60" aria-hidden="true"><path d="M8 40c40-14 96-22 170-20 62 2 118 10 168 6 30-2 52-10 60-20-4 16-30 28-70 32-54 6-110-4-170-6-58-2-104 4-150 14" fill="none" stroke="url(#swashGrad)" stroke-width="3.2" stroke-linecap="round"/></svg>
+            </p>
+          </div>
+          <p class="facts" id="dropFacts" aria-live="polite"></p>
+        </div>
+        <div class="mascot mascot-cameo" data-mascot aria-hidden="true">
+          <img width="252" height="326" alt="" decoding="async">
+        </div>
+        <img class="complete-art" id="completeArt" width="548" height="564" alt="" decoding="async" hidden>
+      </header>
+
+      <div class="notice dev-note" id="simNote" hidden></div>
+
+      <div class="chain-wrap">
+        <div class="chain" id="chain" aria-hidden="true"></div>
+        <p class="chain-count" id="chainCount" role="status"></p>
+      </div>
+
+      <div class="result" id="result" hidden></div>
+
+      <p class="overline run-label">transactions</p>
+      <ol class="tx-list run" id="runList"></ol>
+    </div>
+  </section>
+</main>
+
+<!-- ============ bottom letterbox bar: the one action ============ -->
+<footer class="bar bar-bot" id="barBot">
+  <div class="bar-in">
+    <div class="action" id="action">
+      <div class="sum" id="sum">
+        <p class="sum-main"><span class="sum-count" id="sumCount"></span><span class="sum-worth" id="sumWorth"></span></p>
+        <p class="sum-sub"><button class="out-chip" type="button" id="outChip" popovertarget="outPop" hidden></button><span id="sumFee"></span></p>
+      </div>
+      <div class="act-right">
+        <div class="ring" id="ring" hidden role="timer"><span class="ring-dial"><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15.5" class="ring-bg"/><circle cx="18" cy="18" r="15.5" class="ring-fg" id="ringFg"/></svg><span id="ringText" aria-hidden="true"></span></span><span class="ring-cap" id="ringCap" aria-hidden="true">fresh</span></div>
+        <button class="btn-text" type="button" id="ctaAlt" hidden></button>
+        <button class="btn-gold" type="button" id="cta"><span class="spin" aria-hidden="true"></span><span id="ctaLabel">connect wallet</span></button>
+      </div>
+    </div>
+    <p class="bar-fine" id="barFine">spacedust never holds your funds or keys · your wallet signs every transaction · swaps are final</p>
+  </div>
+</footer>
+<p class="sr" id="srStatus" role="status" aria-live="polite"></p>
+
+<!-- ============ cinema mode: waiting for the wallet ============ -->
+<div class="cinema" id="cinema" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="cinemaCap" hidden>
+  <div class="cinema-in">
+    <div class="cinema-reel" aria-hidden="true">
+      <video id="cinemaReel" width="752" height="416" muted loop playsinline preload="none" poster="/video/dusting-poster.webp" disablepictureinpicture disableremoteplayback>
+        <source src="/video/dusting.mp4" type="video/mp4">
+        <source src="/video/dusting.webm" type="video/webm">
+      </video>
+    </div>
+    <p class="cinema-cap" id="cinemaCap">check your wallet</p>
+    <p class="facts" id="cinemaFacts" role="status"></p>
+    <ul class="ask-list" id="cinemaList"></ul>
+    <div class="cinema-stuck" id="cinemaStuck" hidden>
+      <p class="cinema-hint">Don’t see it? Open your wallet. It may be locked or hidden behind this window.</p>
+      <button class="btn-ghost" type="button" id="cinemaBack">I closed it, go back to the review</button>
+      <p class="hint">Nothing is sent from a prompt you leave behind. If your wallet still shows the request, reject it there.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ wallet picker ============ -->
+<dialog class="sheet" id="walletDlg" aria-labelledby="wd-title">
+  <div class="sheet-in">
+    <div class="sheet-head">
+      <div>
+        <h2 class="sheet-title" id="wd-title">pick your wallet</h2>
+      </div>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+    <div id="wdBody"></div>
+  </div>
+</dialog>
+
+<!-- ============ popovers ============ -->
+<div popover id="outPop" class="pop pop-out" role="dialog" aria-label="Swap into">
+  <div class="pop-head"><p class="pop-title">swap into</p><button class="icon-btn pop-x" type="button" popovertarget="outPop" popovertargetaction="hide" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <div class="out-list" id="outList"></div>
+  <div class="combo">
+    <label class="search">
+      <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
+      <span class="sr">Search any token</span>
+      <input type="text" id="outSearch" role="combobox" aria-expanded="false" aria-controls="outResults" aria-autocomplete="list" placeholder="search a token or paste an address" autocomplete="off" spellcheck="false">
+    </label>
+    <ul class="combo-list" id="outResults" role="listbox" aria-label="Search results" hidden></ul>
+    <p class="combo-note" id="outNote" aria-live="polite">Type 2+ letters. Results show verified status and the address, because names can be copied.</p>
+  </div>
+</div>
+
+<div popover id="setPop" class="pop pop-set" role="dialog" aria-labelledby="sp-title">
+  <div class="pop-head"><p class="pop-title" id="sp-title">protection</p><button class="icon-btn pop-x" type="button" popovertarget="setPop" popovertargetaction="hide" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <div class="field">
+    <div class="field-top"><label for="fSlip">max slippage</label><span class="unit-in"><input id="fSlip" type="number" inputmode="decimal" min="0.1" max="20" step="0.1" value="1"><span>%</span></span></div>
+    <div class="chips" id="slipChips"><button type="button" data-v="0.5">0.5%</button><button type="button" data-v="1">1%</button><button type="button" data-v="2">2%</button></div>
+    <p class="hint" id="slipHint">A swap fails instead of filling worse than this.</p>
+  </div>
+  <div class="field">
+    <div class="field-top"><label for="fLoss">skip if it loses more than</label><span class="unit-in"><input id="fLoss" type="number" inputmode="decimal" min="0" max="50" step="1" value="10"><span>%</span></span></div>
+    <p class="hint" id="lossHint">Compared with the market price. Dust often has thin markets. Max 50%.</p>
+  </div>
+  <label class="toggle">
+    <input type="checkbox" id="fClose" checked>
+    <span class="tg" aria-hidden="true"></span>
+    <span><b>close emptied token accounts</b><br><span class="hint">Gets back ~0.002 SOL of rent per token.</span></span>
+  </label>
+  <div class="pop-foot">
+    <button class="btn-text sm" type="button" id="setReset">reset to defaults</button>
+    <button class="btn-gold sm" type="button" popovertarget="setPop" popovertargetaction="hide">done</button>
+  </div>
+</div>
+
+<div popover id="burnPop" class="pop pop-info" role="dialog" aria-labelledby="bp-title">
+  <div class="pop-head"><p class="pop-title" id="bp-title">where the fee goes</p><button class="icon-btn pop-x" type="button" popovertarget="burnPop" popovertargetaction="hide" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <ol class="mini-steps">
+    <li><span>01</span>Your token is swapped into the output you picked.</li>
+    <li><span>02</span><span id="bpStep2">1% of the minimum guaranteed output buys the burn token.</span></li>
+    <li><span>03</span>That token is burned. Nobody receives it.</li>
+  </ol>
+  <p class="hint">All three happen inside one transaction. If any step fails, none of it happens and no fee is taken.</p>
+  <p class="overline" style="margin-top:14px" id="bpMintLabel">burn token mint · copycats share the name</p>
+  <div class="mint-row"><span class="mono mint-full" id="popMint"></span><button class="icon-btn" type="button" data-copy="mint" aria-label="Copy the burn token mint address"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg></button></div>
+  <button class="btn-ghost sm block" type="button" id="skipFeeBtn"></button>
+</div>
+
+<div popover id="unvPop" class="pop pop-info pop-warn" role="dialog" aria-label="Unverified token">
+  <div class="pop-head"><p class="pop-title warn-title"><svg class="i" aria-hidden="true"><use href="#i-warn"/></svg>warning: unverified</p><button class="icon-btn pop-x" type="button" popovertarget="unvPop" popovertargetaction="hide" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <p class="hint">Not on Jupiter’s verified list. Check the name and address before you swap it.</p>
+  <p class="mono mint-full" id="unvMint"></p>
+</div>
+
+<div popover id="walletPop" class="pop pop-wallet" role="dialog" aria-label="Wallet">
+  <div class="pop-head"><p class="overline" id="wpWith">connected</p><button class="icon-btn pop-x" type="button" popovertarget="walletPop" popovertargetaction="hide" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <p class="mono mint-full" id="wpAddr"></p>
+  <div class="pop-actions">
+    <button class="menu-item" type="button" data-copy="addr"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>copy address</button>
+    <a class="menu-item" href="https://solscan.io/" id="wpSolscan" target="_blank" rel="noreferrer"><svg class="i" aria-hidden="true"><use href="#i-ext"/></svg>view on Solscan</a>
+    <button class="menu-item" type="button" id="wpSwitch"><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg>switch wallet</button>
+    <button class="menu-item danger" type="button" id="wpDisconnect"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg>disconnect</button>
+  </div>
+</div>
+
+<div popover id="rangePop" class="pop pop-range" role="dialog" aria-labelledby="rp-title">
+  <div class="pop-head"><p class="pop-title" id="rp-title">custom range</p><button class="icon-btn pop-x" type="button" popovertarget="rangePop" popovertargetaction="hide" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <div class="range-fields">
+    <label><span>worth at least</span><span class="unit-in pre"><span>$</span><input id="fMin" type="number" inputmode="decimal" min="0" step="any" value="0"></span></label>
+    <label><span>worth at most</span><span class="unit-in pre"><span>$</span><input id="fMax" type="number" inputmode="decimal" min="0" step="any" value="2"></span></label>
+  </div>
+  <p class="hint" id="rangeHint">Picks every priced token in this range. You can still untick any of them.</p>
+  <button class="btn-gold sm block" type="button" id="rangeApply">apply range</button>
+</div>
+
+<!-- toasts: die-cut stickers in the top layer -->
+<div popover="manual" id="toasts" class="toasts"></div>
+</body>
+</html>

@@ -1,4 +1,4 @@
-/* duster · dev/QA mode. NEVER SHIPS: listed in .vercelignore, and app.js only imports it on localhost/127.0.0.1
+/* spacedust · dev/QA mode. NEVER SHIPS: listed in .vercelignore, and app.js only imports it on localhost/127.0.0.1
    with ?demo or ?watch=<address>.
 
    ?watch=<address>   A watch-only Wallet Standard wallet that "connects" as that address, so the real /api/holdings,
@@ -329,7 +329,7 @@ export async function init(app, params) {
     if (route === "/api/holdings") {
       if (dev.holdings === "slow") { await new Promise((r) => (pendingHoldings = r)); }
       await sleep(600, signal);
-      if (dev.holdings === "error") throw new DevApiError("Duster is busy right now. Try again when the timer runs out.", 429);
+      if (dev.holdings === "error") throw new DevApiError("Spacedust is busy right now. Try again when the timer runs out.", 429);
       return (HOLDINGS[dev.holdings] || HOLDINGS.normal)().map(({ _loss, _skip, ...r }) => r);
     }
     if (route === "/api/tokens/search") {
@@ -341,7 +341,7 @@ export async function init(app, params) {
     if (route === "/api/accounts") {
       if (dev.accounts === "slow") await sleep(30_000, signal);
       await sleep(500, signal);
-      if (dev.accounts === "error") throw new DevApiError("Duster is busy right now. Try again when the timer runs out.", 429);
+      if (dev.accounts === "error") throw new DevApiError("Spacedust is busy right now. Try again when the timer runs out.", 429);
       const withPrices = url.searchParams.get("prices") === "1";
       if (withPrices) await sleep(700, signal);
       return { accounts: (ACCOUNTS[dev.accounts] || ACCOUNTS.normal)().map((a) => priced(a, withPrices)).map(({ _skip, _usd, ...a }) => a), priced: withPrices, priceError: false };

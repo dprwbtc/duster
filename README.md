@@ -3,6 +3,12 @@
 Swap many dust tokens into one asset (SOL by default) using Jupiter Swap V2 `/build`:
 one transaction per token, all approved in a single wallet prompt.
 
+The site has two pages. The web UI, **Spacedust**, is at `/dust` (`public/dust/index.html` with `public/app.js` and
+`public/styles.css`). The $LILVADER teaser is the homepage at `/` (`public/index.html`). Its 3D chain is
+`home/scene.js`, bundled with three.js into `public/home/scene.js` by `npm run build:home`. Run that after editing
+the scene and commit the output. The CSP allows only same-origin scripts and fonts, so three.js is bundled and every
+font is self-hosted under `public/fonts/`.
+
 ```bash
 cp .env.example .env   # fill in JUPITER_API_KEY, RPC_URL, KEYPAIR_PATH
 set -a; . ./.env; set +a
@@ -39,24 +45,24 @@ Notes
 ## Web UI (local)
 
 ```bash
-npm run web      # then open http://localhost:3000
+npm run web      # then open http://localhost:3000/dust (the teaser is at /)
 ```
 
 Needs only `JUPITER_API_KEY` (and ideally `RPC_URL`). No private key: users connect Phantom, Solflare or
 Backpack and sign in their wallet. The local server runs the same handlers and security headers as Vercel.
 
-The UI is plain HTML/CSS/JS in `public/` (no build step). It previews in chunks of 8 tokens, one `/api/plan`
+Spacedust is plain HTML/CSS/JS in `public/` (no build step). It previews in chunks of 8 tokens, one `/api/plan`
 request after another (side by side when `JUPITER_RPS` is 3 or more), so progress is real and no single request
 nears the 60s function limit. The quote freshness timer counts from the oldest chunk; once the oldest quote is older
 than 120s the plan is refreshed before signing (quotes under 60s old are kept, older ones re-quoted). `/api/refresh` stamps a fresh blockhash right before the
 wallet prompt, and a plan is never signed again once any of its transactions went out (a retry is a fresh preview
 of what didn't land). If the wallet never answers, the user can stop waiting; a late signature is dropped, never
-sent. Token images always come from Duster's own origin (`/i/<mint>`, served by `/api/img`, below), never from the
-host a token's creator picked, so an airdropped token's image host can't see who opened Duster.
+sent. Token images always come from the site's own origin (`/i/<mint>`, served by `/api/img`, below), never from the
+host a token's creator picked, so an airdropped token's image host can't see who opened Spacedust.
 
 **Dev/QA mode** (localhost only; `public/dev.js` is in `.vercelignore` and never ships):
 
-- `http://localhost:3000/?demo`: everything from fixtures, plus a "dev · states" popover that jumps to any
+- `http://localhost:3000/dust?demo`: everything from fixtures, plus a "dev · states" popover that jumps to any
   scene (landing, loading, list, empty, errors, building, review, expired quotes, wallet prompt, sending, success,
   partial failure, expired, 30+ tokens, short on SOL, into $LILVADER, …) and every cleanup state (list, nothing to close,
   loading, error, building, review, review with burns, burn section open, can't close any, big wallet, success,
@@ -65,7 +71,7 @@ host a token's creator picked, so an airdropped token's image host can't see who
   that couldn't be checked, accounts holding NFTs or collectibles, empty NFT and collectible accounts and a frozen
   empty NFT account (real mints, so their images are real). Add
   `&outcome=partial|expired` or `&fee=off`. A few fixtures use real mints, so `/api/img` shows real images.
-- `http://localhost:3000/?watch=<address>`: a watch-only wallet that "connects" as that address, so real
+- `http://localhost:3000/dust?watch=<address>`: a watch-only wallet that "connects" as that address, so real
   holdings, quotes, `/api/accounts`, `/api/reclaim` (build + simulate) and `/api/refresh` run against real data.
   It never signs, and `/api/send` and `/api/status` are answered from fixtures, so nothing can reach the chain.
 
@@ -293,11 +299,14 @@ Layout: `public/` is the static site, `api/*.ts` are Vercel Functions, `src/` is
    ```
    The handlers also have a per-instance limiter, but that's only a backstop. After deploying, check that
    `curl -I https://<your-domain>/i/So11111111111111111111111111111111111111112` answers `200 image/webp`.
-4. **Turn on Web Analytics** (Project → *Analytics* → *Enable*) to see traffic. The page already loads
+4. **Turn on Web Analytics** (Project → *Analytics* → *Enable*) to see traffic. Both pages already load
    `/_vercel/insights/script.js`, which Vercel serves from the site's own origin once Analytics is on (until then it
    404s harmlessly), so the CSP needs no change. It sets no cookies, and Duster's URLs never carry a wallet address.
-5. **Set a spend limit** under Team Settings → Billing, so a traffic spike can't surprise you.
-6. **Test on the preview deployment** with a wallet holding a few dollars of dust before sharing the link.
+5. **Add the domain** under Project → *Settings* → *Domains*: `lilvader.space` (the teaser) and
+   `www.lilvader.space` redirecting to it. Spacedust is then `https://lilvader.space/dust`. At the registrar, point
+   the records Vercel lists there (an `A` record for the apex, a `CNAME` for `www`).
+6. **Set a spend limit** under Team Settings → Billing, so a traffic spike can't surprise you.
+7. **Test on the preview deployment** with a wallet holding a few dollars of dust before sharing the link.
 
 ### Buy-and-burn fee
 
